@@ -77,6 +77,13 @@ contains update, ping and shell commands. `Пресеты` contains saved wizard
 Nested screens include navigation buttons back to the previous section and to the
 main menu.
 
+The main menu also shows a compact node summary:
+
+```text
+Ноды:
+- RU-1-Node: 100.88.1.3
+```
+
 Telegram may still show its standard Start button for opening the bot. After
 that, use the inline menu.
 
@@ -148,12 +155,27 @@ Open `Ноды` to see saved nodes. Each node has buttons for:
 Update
 Ping
 Выполнить команду
+Изменить
+Показать доступ
 Задать ключ
 Убрать ключ
 Удалить
 ```
 
 `Update` runs the RemnaNode update playbook on that node.
+
+`Изменить` lets you update:
+
+```text
+Название
+Пользователь
+IP/host
+Порт
+Способ входа
+```
+
+`Показать доступ` sends the saved SSH password or SSH private key into the chat.
+Use it only in a trusted admin chat.
 
 ## Operations
 

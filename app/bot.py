@@ -78,6 +78,10 @@ class BotController:
             await self._handle_text_preset_message(message, flow)
         elif flow_type == "preset_key":
             await self._handle_key_preset_message(message, flow)
+        elif flow_type == "edit_node":
+            await self._handle_edit_node_message(message, flow)
+        elif flow_type == "edit_password":
+            await self._handle_edit_password_message(message, flow)
         else:
             self._clear_flow(user_id)
             await self._send_main_menu(message, "Сценарий сброшен. Выбери действие.")
@@ -125,6 +129,10 @@ class BotController:
             await self._send_nodes_menu(message, user_id)
         elif data.startswith("node:"):
             await self._handle_node_button(message, user_id, data)
+        elif data.startswith("edit:"):
+            await self._handle_edit_button(message, user_id, data)
+        elif data.startswith("secret:"):
+            await self._handle_secret_button(message, user_id, data)
         elif data == "ops:menu":
             await self._send_operations_menu(message)
         elif data.startswith("op:"):
@@ -383,6 +391,12 @@ class BotController:
                 f"Пришли приватный SSH-ключ для {node_name} текстом или файлом.",
                 reply_markup=self._cancel_keyboard(),
             )
+        elif action == "edit":
+            node_name = self._get_ref(user_id, parts[2])
+            await self._send_edit_node_menu(message, user_id, node_name)
+        elif action == "secret":
+            node_name = self._get_ref(user_id, parts[2])
+            await self._send_secret_menu(message, user_id, node_name)
         elif action == "clearkey":
             node_name = self._get_ref(user_id, parts[2])
             node = self.store.get(node_name)
@@ -406,6 +420,85 @@ class BotController:
             await message.answer(
                 f"SSH-ключ отвязан от ноды {node.name}.",
                 reply_markup=self._main_keyboard(),
+            )
+
+    async def _handle_edit_button(self, message: Message, user_id: int, data: str) -> None:
+        parts = data.split(":")
+        action = parts[1]
+
+        if action == "field":
+            field = parts[2]
+            node_name = self._get_ref(user_id, parts[3])
+            node = self.store.get(node_name)
+            if not node:
+                await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+                return
+
+            self._session(user_id)["flow"] = {
+                "type": "edit_node",
+                "data": {"node": node_name, "field": field},
+            }
+            labels = {
+                "name": "новое название ноды",
+                "user": "нового SSH-пользователя",
+                "host": "новый IP или hostname",
+                "port": "новый SSH-порт",
+            }
+            await message.answer(
+                f"Напиши {labels[field]} для {node_name}.",
+                reply_markup=self._cancel_keyboard(),
+            )
+        elif action == "auth":
+            node_name = self._get_ref(user_id, parts[2])
+            await self._send_edit_auth_menu(message, user_id, node_name)
+        elif action == "auth_key":
+            node_name = self._get_ref(user_id, parts[2])
+            self._session(user_id)["flow"] = {"type": "set_key", "data": {"node": node_name}}
+            await message.answer(
+                f"Пришли новый приватный SSH-ключ для {node_name} текстом или файлом.",
+                reply_markup=self._cancel_keyboard(),
+            )
+        elif action == "auth_password":
+            node_name = self._get_ref(user_id, parts[2])
+            self._session(user_id)["flow"] = {"type": "edit_password", "data": {"node": node_name}}
+            await message.answer(
+                f"Напиши новый SSH-пароль для {node_name}.",
+                reply_markup=self._cancel_keyboard(),
+            )
+
+    async def _handle_secret_button(self, message: Message, user_id: int, data: str) -> None:
+        parts = data.split(":")
+        action = parts[1]
+        node_name = self._get_ref(user_id, parts[2])
+        node = self.store.get(node_name)
+        if not node:
+            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            return
+
+        if action == "password":
+            if not node.password:
+                await message.answer("У этой ноды нет сохраненного пароля.", reply_markup=self._main_keyboard())
+                return
+            await self._send_secret_text(
+                message,
+                f"Пароль для {node.name}",
+                node.password,
+                back_callback=f"node:secret:{self._remember_ref(user_id, node.name)}",
+            )
+        elif action == "key":
+            if not node.ssh_key_path:
+                await message.answer("У этой ноды нет сохраненного SSH-ключа.", reply_markup=self._main_keyboard())
+                return
+            try:
+                key_text = Path(node.ssh_key_path).read_text(encoding="utf-8")
+            except OSError as exc:
+                await message.answer(f"Не удалось прочитать ключ: {exc}", reply_markup=self._main_keyboard())
+                return
+            await self._send_secret_text(
+                message,
+                f"SSH-ключ для {node.name}",
+                key_text,
+                back_callback=f"node:secret:{self._remember_ref(user_id, node.name)}",
             )
 
     async def _handle_operation_button(self, message: Message, user_id: int, data: str) -> None:
@@ -478,6 +571,64 @@ class BotController:
         self._clear_flow(message.from_user.id)
         await message.answer(
             f"SSH-ключ сохранен и привязан к ноде {node.name}.",
+            reply_markup=self._main_keyboard(),
+        )
+
+    async def _handle_edit_node_message(self, message: Message, flow: dict[str, Any]) -> None:
+        data = flow.get("data", {})
+        node_name = data.get("node")
+        field = data.get("field")
+        node = self.store.get(node_name)
+        if not node:
+            self._clear_flow(message.from_user.id)
+            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            return
+
+        try:
+            value = self._validate_add_value(field, message.text or "")
+            updated_node = self._updated_node(node, field, value)
+            if field == "name" and value != node.name and self.store.get(value):
+                raise ValueError("нода с таким названием уже существует")
+            self._save_node_edit(node, updated_node)
+        except (OSError, ValueError) as exc:
+            await message.answer(f"Не удалось изменить ноду: {exc}", reply_markup=self._cancel_keyboard())
+            return
+
+        self._clear_flow(message.from_user.id)
+        await message.answer(
+            f"Нода обновлена: {updated_node.name} {updated_node.user}@{updated_node.host}:{updated_node.port}",
+            reply_markup=self._main_keyboard(),
+        )
+
+    async def _handle_edit_password_message(self, message: Message, flow: dict[str, Any]) -> None:
+        node_name = flow.get("data", {}).get("node")
+        node = self.store.get(node_name)
+        if not node:
+            self._clear_flow(message.from_user.id)
+            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            return
+
+        password = (message.text or "").strip()
+        if not password:
+            await message.answer("Пароль не должен быть пустым.", reply_markup=self._cancel_keyboard())
+            return
+
+        self._delete_managed_key(node)
+        self.store.add_or_update(
+            Node(
+                name=node.name,
+                host=node.host,
+                user=node.user,
+                port=node.port,
+                ssh_key_path=None,
+                password=password,
+                become=node.become,
+                become_password=node.become_password,
+            )
+        )
+        self._clear_flow(message.from_user.id)
+        await message.answer(
+            f"Пароль для {node.name} обновлен.",
             reply_markup=self._main_keyboard(),
         )
 
@@ -607,12 +758,24 @@ class BotController:
         await message.answer(f"Пресет SSH-ключа сохранен: {data['name']}", reply_markup=self._main_keyboard())
 
     async def _send_main_menu(self, message: Message, text: str = "Главное меню") -> None:
+        nodes = self.store.list()
+        if nodes:
+            node_lines = ["\nНоды:"]
+            for node in nodes[:20]:
+                node_lines.append(f"- {node.name}: {node.host}")
+            if len(nodes) > 20:
+                node_lines.append(f"... и еще {len(nodes) - 20}")
+            nodes_text = "\n".join(node_lines)
+        else:
+            nodes_text = "\n\nНоды: пока не добавлены"
+
         body = (
             f"{text}\n\n"
             "Разделы:\n"
             "Ноды - добавление, список и действия с конкретной нодой.\n"
             "Операции - массовый update, ping и выполнение команд.\n"
             "Пресеты - сохраненные значения для мастера добавления."
+            f"{nodes_text}"
         )
         await message.answer(body, reply_markup=self._main_keyboard())
 
@@ -664,6 +827,10 @@ class BotController:
                 ],
                 [InlineKeyboardButton(text="Выполнить команду", callback_data=f"node:run:{token}")],
                 [
+                    InlineKeyboardButton(text="Изменить", callback_data=f"node:edit:{token}"),
+                    InlineKeyboardButton(text="Показать доступ", callback_data=f"node:secret:{token}"),
+                ],
+                [
                     InlineKeyboardButton(text="Задать ключ", callback_data=f"node:setkey:{token}"),
                     InlineKeyboardButton(text="Убрать ключ", callback_data=f"node:clearkey:{token}"),
                 ],
@@ -672,6 +839,70 @@ class BotController:
             ]
         )
         await message.answer(text, reply_markup=keyboard)
+
+    async def _send_edit_node_menu(self, message: Message, user_id: int, node_name: str) -> None:
+        node = self.store.get(node_name)
+        if not node:
+            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            return
+
+        token = self._remember_ref(user_id, node.name)
+        await message.answer(
+            f"Что изменить у {node.name}?",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="Название", callback_data=f"edit:field:name:{token}"),
+                        InlineKeyboardButton(text="Пользователь", callback_data=f"edit:field:user:{token}"),
+                    ],
+                    [
+                        InlineKeyboardButton(text="IP/host", callback_data=f"edit:field:host:{token}"),
+                        InlineKeyboardButton(text="Порт", callback_data=f"edit:field:port:{token}"),
+                    ],
+                    [InlineKeyboardButton(text="Способ входа", callback_data=f"edit:auth:{token}")],
+                    self._back_home_row(f"node:open:{token}"),
+                ]
+            ),
+        )
+
+    async def _send_edit_auth_menu(self, message: Message, user_id: int, node_name: str) -> None:
+        node = self.store.get(node_name)
+        if not node:
+            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            return
+
+        token = self._remember_ref(user_id, node.name)
+        await message.answer(
+            f"Новый способ входа для {node.name}:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="SSH-ключ", callback_data=f"edit:auth_key:{token}")],
+                    [InlineKeyboardButton(text="Пароль", callback_data=f"edit:auth_password:{token}")],
+                    self._back_home_row(f"node:edit:{token}"),
+                ]
+            ),
+        )
+
+    async def _send_secret_menu(self, message: Message, user_id: int, node_name: str) -> None:
+        node = self.store.get(node_name)
+        if not node:
+            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            return
+
+        token = self._remember_ref(user_id, node.name)
+        rows: list[list[InlineKeyboardButton]] = []
+        if node.password:
+            rows.append([InlineKeyboardButton(text="Показать пароль", callback_data=f"secret:password:{token}")])
+        if node.ssh_key_path:
+            rows.append([InlineKeyboardButton(text="Показать SSH-ключ", callback_data=f"secret:key:{token}")])
+        if not rows:
+            rows.append([InlineKeyboardButton(text="Секрет не задан", callback_data=f"node:open:{token}")])
+
+        rows.append(self._back_home_row(f"node:open:{token}"))
+        await message.answer(
+            f"Доступ для {node.name}. Эти данные будут отправлены в чат.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
 
     async def _send_operations_menu(self, message: Message) -> None:
         await message.answer(
@@ -808,6 +1039,26 @@ class BotController:
             reply_markup=self._main_keyboard(),
         )
 
+    async def _send_secret_text(
+        self,
+        message: Message,
+        title: str,
+        value: str,
+        back_callback: str,
+    ) -> None:
+        max_chars = 3500
+        chunks = [value[i : i + max_chars] for i in range(0, len(value), max_chars)] or [""]
+        await message.answer(title)
+        for index, chunk in enumerate(chunks, start=1):
+            suffix = f" ({index}/{len(chunks)})" if len(chunks) > 1 else ""
+            await message.answer(
+                f"<pre>{html.escape(chunk)}</pre>{suffix}",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[self._back_home_row(back_callback)])
+                if index == len(chunks)
+                else None,
+            )
+
     async def _require_admin_message(self, message: Message) -> bool:
         user = message.from_user
         if user and user.id in self.settings.admin_ids:
@@ -910,6 +1161,80 @@ class BotController:
             raise ValueError(f"неизвестное поле {field}")
 
         return value
+
+    def _updated_node(self, node: Node, field: str, value: str) -> Node:
+        values: dict[str, Any] = {
+            "name": node.name,
+            "host": node.host,
+            "user": node.user,
+            "port": node.port,
+            "ssh_key_path": node.ssh_key_path,
+            "password": node.password,
+            "become": node.become,
+            "become_password": node.become_password,
+        }
+        if field == "port":
+            values[field] = int(value)
+        elif field in {"name", "user", "host"}:
+            values[field] = value
+        else:
+            raise ValueError(f"неизвестное поле {field}")
+
+        return Node(**values)
+
+    def _save_node_edit(self, old_node: Node, new_node: Node) -> None:
+        if old_node.name == new_node.name:
+            self.store.add_or_update(new_node)
+            return
+
+        new_key_path = self._renamed_managed_key_path(old_node, new_node.name)
+        old_key_path = Path(old_node.ssh_key_path) if old_node.ssh_key_path else None
+        should_move_key = bool(new_key_path and old_key_path and old_key_path.exists())
+        if should_move_key and new_key_path:
+            if new_key_path.exists():
+                raise ValueError(f"файл ключа уже существует: {new_key_path}")
+            new_node = Node(
+                name=new_node.name,
+                host=new_node.host,
+                user=new_node.user,
+                port=new_node.port,
+                ssh_key_path=str(new_key_path),
+                password=new_node.password,
+                become=new_node.become,
+                become_password=new_node.become_password,
+            )
+
+        key_was_moved = False
+        try:
+            if should_move_key and new_key_path and old_key_path:
+                old_key_path.rename(new_key_path)
+                key_was_moved = True
+
+            self.store.add_or_update(new_node)
+            deleted = self.store.delete(old_node.name)
+            if not deleted:
+                raise ValueError("старая нода не найдена во время переименования")
+        except Exception:
+            if key_was_moved and new_key_path and old_key_path and new_key_path.exists():
+                try:
+                    new_key_path.rename(old_key_path)
+                except OSError:
+                    pass
+            raise
+
+    def _renamed_managed_key_path(self, old_node: Node, new_name: str) -> Path | None:
+        if not old_node.ssh_key_path:
+            return None
+
+        old_key_path = Path(old_node.ssh_key_path)
+        try:
+            old_key_path.resolve(strict=False).relative_to(
+                self.settings.managed_ssh_keys_dir.resolve(strict=False)
+            )
+        except ValueError:
+            return None
+
+        return self._managed_key_path(new_name)
 
     def _managed_key_path(self, node_name: str) -> Path:
         return self.settings.managed_ssh_keys_dir / f"{node_name}.key"
