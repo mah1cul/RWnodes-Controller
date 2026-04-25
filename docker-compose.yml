@@ -6,10 +6,16 @@ services:
     volumes:
       - rwnodes_data:/data
       - ./ssh_keys:/ssh_keys:ro
-    ports:
-      - "${WEBHOOK_PORT:-8080}:${WEBHOOK_PORT:-8080}"
+    expose:
+      - "${WEBHOOK_PORT:-8080}"
+    networks:
+      - caddy
     restart: unless-stopped
 
 volumes:
   rwnodes_data:
 
+networks:
+  caddy:
+    external: true
+    name: ${CADDY_DOCKER_NETWORK:-caddy}

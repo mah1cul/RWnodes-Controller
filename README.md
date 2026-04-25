@@ -201,10 +201,25 @@ WEBHOOK_LISTEN=0.0.0.0
 WEBHOOK_PORT=8080
 WEBHOOK_PATH=telegram/webhook
 WEBHOOK_SECRET_TOKEN=change-me
+CADDY_DOCKER_NETWORK=caddy
 ```
 
-Expose `WEBHOOK_PORT` through a reverse proxy or tunnel. The URL path in
-`WEBHOOK_URL` must match `WEBHOOK_PATH`.
+The compose file does not publish `WEBHOOK_PORT` to the host. It only exposes
+the port inside Docker and attaches the app to an external Docker network used
+by Caddy. Create or reuse that network:
+
+```bash
+docker network create caddy
+```
+
+If your Caddy container uses another network name, set `CADDY_DOCKER_NETWORK` to
+that exact name. In Caddy, proxy to:
+
+```text
+rwnodes-controller:8080
+```
+
+The URL path in `WEBHOOK_URL` must match `WEBHOOK_PATH`.
 
 ## Security Notes
 
