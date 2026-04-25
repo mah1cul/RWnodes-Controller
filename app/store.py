@@ -28,10 +28,10 @@ class Node:
     @property
     def auth_summary(self) -> str:
         if self.ssh_key_path:
-            return f"key={self.ssh_key_path}"
+            return "SSH key"
         if self.password:
-            return "password=yes"
-        return "auth=ssh-default"
+            return "SSH password"
+        return "SSH default"
 
 
 @dataclass(frozen=True)

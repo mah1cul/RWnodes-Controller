@@ -165,6 +165,11 @@ class AnsibleRunner:
                 vars_for_node["ansible_ssh_private_key_file"] = node.ssh_key_path
             if node.password:
                 vars_for_node["ansible_password"] = node.password
+                vars_for_node["ansible_connection"] = "ssh"
+                vars_for_node["ansible_ssh_common_args"] = (
+                    "-o PreferredAuthentications=password "
+                    "-o PubkeyAuthentication=no"
+                )
             if node.become_password:
                 vars_for_node["ansible_become_password"] = node.become_password
             hosts[node.name] = vars_for_node
