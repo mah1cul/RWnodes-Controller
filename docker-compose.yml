@@ -1,0 +1,15 @@
+services:
+  rwnodes-controller:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - rwnodes_data:/data
+      - ./ssh_keys:/ssh_keys:ro
+    ports:
+      - "${WEBHOOK_PORT:-8080}:${WEBHOOK_PORT:-8080}"
+    restart: unless-stopped
+
+volumes:
+  rwnodes_data:
+

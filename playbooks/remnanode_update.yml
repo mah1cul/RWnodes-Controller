@@ -1,0 +1,9 @@
+- name: Update RemnaNode docker compose stack
+  hosts: managed
+  gather_facts: false
+  tasks:
+    - name: Pull and restart RemnaNode
+      ansible.builtin.shell: cd /opt/remnanode && docker compose pull && docker compose down && docker compose up -d
+      args:
+        executable: /bin/bash
+

@@ -179,3 +179,10 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# RWnodes Controller local secrets and state
+ssh_keys/*
+!ssh_keys/.gitkeep
+data/
+*.sqlite3
+*.sqlite3-journal
