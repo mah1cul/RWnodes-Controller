@@ -1,6 +1,7 @@
 # RWnodes Controller
 
-Python + Ansible controller for managing remote nodes from a Telegram bot.
+Python + Ansible controller for managing remote nodes from an aiogram-based
+Telegram bot.
 
 The first built-in operation is RemnaNode update:
 
