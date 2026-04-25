@@ -153,7 +153,7 @@ class AnsibleRunner:
         )
 
     def _build_inventory(self, nodes: list[Node]) -> dict[str, Any]:
-        hostvars: dict[str, dict[str, Any]] = {}
+        hosts: dict[str, dict[str, Any]] = {}
         for node in nodes:
             vars_for_node: dict[str, Any] = {
                 "ansible_host": node.host,
@@ -167,10 +167,14 @@ class AnsibleRunner:
                 vars_for_node["ansible_password"] = node.password
             if node.become_password:
                 vars_for_node["ansible_become_password"] = node.become_password
-            hostvars[node.name] = vars_for_node
+            hosts[node.name] = vars_for_node
 
         return {
-            "managed": {"hosts": [node.name for node in nodes]},
-            "_meta": {"hostvars": hostvars},
+            "all": {
+                "children": {
+                    "managed": {
+                        "hosts": hosts,
+                    }
+                }
+            }
         }
-
