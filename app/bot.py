@@ -24,7 +24,7 @@ from app.store import (
 
 
 MAX_PRIVATE_KEY_BYTES = 128 * 1024
-ADD_FIELDS = ("name", "user", "host", "port", "ssh_key")
+ADD_FIELDS = ("name", "user", "host", "port", "auth")
 TEXT_PRESET_FIELDS = ("name", "user", "host", "port")
 
 
@@ -113,8 +113,14 @@ class BotController:
             await self._handle_add_fixed_value(message, user_id, data)
         elif data.startswith("add:pre:"):
             await self._handle_add_preset_value(message, user_id, data)
+        elif data.startswith("add:auth:"):
+            await self._handle_add_auth_choice(message, user_id, data)
+        elif data == "add:back_auth":
+            await self._back_to_add_auth(message, user_id)
         elif data == "add:skip_key":
             await self._finish_add_wizard(message, user_id)
+        elif data == "nodes:menu":
+            await self._send_nodes_section(message)
         elif data == "nodes:list":
             await self._send_nodes_menu(message, user_id)
         elif data.startswith("node:"):
@@ -154,6 +160,10 @@ class BotController:
                     "Пришли приватный SSH-ключ текстом или файлом.",
                     reply_markup=self._add_step_keyboard(user_id, "ssh_key"),
                 )
+        elif step == "password":
+            await self._finish_add_wizard(message, user_id, password=message.text or "")
+        elif step == "auth":
+            await message.answer("Выбери способ входа кнопкой.", reply_markup=self._add_step_keyboard(user_id, "auth"))
         else:
             self._clear_flow(user_id)
             await self._send_main_menu(message, "Мастер добавления сброшен.")
@@ -161,6 +171,35 @@ class BotController:
     async def _handle_add_fixed_value(self, message: Message, user_id: int, data: str) -> None:
         _, _, field, value = data.split(":", 3)
         await self._accept_add_text_value(message, user_id, field, value)
+
+    async def _handle_add_auth_choice(self, message: Message, user_id: int, data: str) -> None:
+        auth_method = data.rsplit(":", 1)[-1]
+        flow = self._session(user_id).get("flow") or {}
+        if flow.get("type") != "add_node" or flow.get("step") != "auth":
+            await self._send_main_menu(message, "Мастер добавления неактивен.")
+            return
+
+        add_data = flow.setdefault("data", {})
+        if auth_method == "key":
+            add_data["auth_method"] = "key"
+            flow["step"] = "ssh_key"
+            await self._ask_add_step(message, user_id, "ssh_key")
+        elif auth_method == "password":
+            add_data["auth_method"] = "password"
+            flow["step"] = "password"
+            await self._ask_add_step(message, user_id, "password")
+        else:
+            await message.answer("Неизвестный способ входа.", reply_markup=self._add_step_keyboard(user_id, "auth"))
+
+    async def _back_to_add_auth(self, message: Message, user_id: int) -> None:
+        flow = self._session(user_id).get("flow") or {}
+        if flow.get("type") != "add_node":
+            await self._send_main_menu(message, "Мастер добавления неактивен.")
+            return
+
+        flow["step"] = "auth"
+        flow.setdefault("data", {}).pop("auth_method", None)
+        await self._ask_add_step(message, user_id, "auth")
 
     async def _handle_add_preset_value(self, message: Message, user_id: int, data: str) -> None:
         _, _, field, token = data.split(":", 3)
@@ -217,7 +256,9 @@ class BotController:
             "user": "Пользователь SSH? Например: root",
             "host": "IP или hostname ноды?",
             "port": "SSH-порт?",
+            "auth": "Как подключаться к ноде?",
             "ssh_key": "Пришли приватный SSH-ключ текстом или файлом. Если есть пресет, нажми кнопку.",
+            "password": "Напиши SSH-пароль для этой ноды.",
         }
         await message.answer(prompts[field], reply_markup=self._add_step_keyboard(user_id, field))
 
@@ -228,6 +269,7 @@ class BotController:
         key_text: str | None = None,
         document: Document | None = None,
         preset_key_path: Path | None = None,
+        password: str | None = None,
     ) -> None:
         flow = self._session(user_id).get("flow") or {}
         add_data = flow.get("data") or {}
@@ -238,6 +280,20 @@ class BotController:
             return
 
         name = add_data["name"]
+        password = password.strip() if password else None
+        auth_method = add_data.get("auth_method")
+        if auth_method not in {"key", "password"}:
+            flow["step"] = "auth"
+            await message.answer("Выбери способ входа.", reply_markup=self._add_step_keyboard(user_id, "auth"))
+            return
+        if auth_method == "password" and not password:
+            await message.answer("Пароль не должен быть пустым.", reply_markup=self._add_step_keyboard(user_id, "password"))
+            return
+        if auth_method == "key" and not (key_text or document or preset_key_path):
+            flow["step"] = "ssh_key"
+            await message.answer("Нужен SSH-ключ или пресет ключа.", reply_markup=self._add_step_keyboard(user_id, "ssh_key"))
+            return
+
         key_path = self._managed_key_path(name) if key_text or document or preset_key_path else None
         node = Node(
             name=name,
@@ -245,6 +301,7 @@ class BotController:
             user=add_data["user"],
             port=int(add_data["port"]),
             ssh_key_path=str(key_path) if key_path else None,
+            password=password,
         )
         existing = self.store.get(name)
 
@@ -269,7 +326,12 @@ class BotController:
             self._delete_managed_key(existing)
 
         self._clear_flow(user_id)
-        auth = "с ключом" if node.ssh_key_path else "без ключа"
+        if node.ssh_key_path:
+            auth = "с SSH-ключом"
+        elif node.password:
+            auth = "с паролем"
+        else:
+            auth = "без авторизации"
         await message.answer(
             f"Нода сохранена: {node.name} {node.user}@{node.host}:{node.port}, {auth}",
             reply_markup=self._main_keyboard(),
@@ -545,7 +607,26 @@ class BotController:
         await message.answer(f"Пресет SSH-ключа сохранен: {data['name']}", reply_markup=self._main_keyboard())
 
     async def _send_main_menu(self, message: Message, text: str = "Главное меню") -> None:
-        await message.answer(text, reply_markup=self._main_keyboard())
+        body = (
+            f"{text}\n\n"
+            "Разделы:\n"
+            "Ноды - добавление, список и действия с конкретной нодой.\n"
+            "Операции - массовый update, ping и выполнение команд.\n"
+            "Пресеты - сохраненные значения для мастера добавления."
+        )
+        await message.answer(body, reply_markup=self._main_keyboard())
+
+    async def _send_nodes_section(self, message: Message) -> None:
+        await message.answer(
+            "Раздел: Ноды",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Добавить ноду", callback_data="add:start")],
+                    [InlineKeyboardButton(text="Список нод", callback_data="nodes:list")],
+                    self._home_row(),
+                ]
+            ),
+        )
 
     async def _send_nodes_menu(self, message: Message, user_id: int) -> None:
         nodes = self.store.list()
@@ -560,7 +641,7 @@ class BotController:
             token = self._remember_ref(user_id, node.name)
             rows.append([InlineKeyboardButton(text=node.name, callback_data=f"node:open:{token}")])
 
-        rows.append([InlineKeyboardButton(text="Назад", callback_data="menu:main")])
+        rows.append(self._back_home_row("nodes:menu"))
         await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
     async def _send_node_details(self, message: Message, user_id: int, node_name: str) -> None:
@@ -587,19 +668,20 @@ class BotController:
                     InlineKeyboardButton(text="Убрать ключ", callback_data=f"node:clearkey:{token}"),
                 ],
                 [InlineKeyboardButton(text="Удалить", callback_data=f"node:delete:{token}")],
-                [InlineKeyboardButton(text="Назад", callback_data="nodes:list")],
+                self._back_home_row("nodes:list"),
             ]
         )
         await message.answer(text, reply_markup=keyboard)
 
     async def _send_operations_menu(self, message: Message) -> None:
         await message.answer(
-            "Выбери операцию.",
+            "Раздел: Операции",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="Обновить RemnaNode", callback_data="op:update")],
                     [InlineKeyboardButton(text="Ping", callback_data="op:ping")],
-                    [InlineKeyboardButton(text="Назад", callback_data="menu:main")],
+                    [InlineKeyboardButton(text="Выполнить команду", callback_data="cmd:start")],
+                    self._home_row(),
                 ]
             ),
         )
@@ -621,19 +703,19 @@ class BotController:
         for node in nodes:
             token = self._remember_ref(user_id, node.name)
             rows.append([InlineKeyboardButton(text=node.name, callback_data=f"{prefix}:{token}")])
-        rows.append([InlineKeyboardButton(text="Назад", callback_data="menu:main")])
+        rows.append(self._back_home_row("ops:menu"))
         await message.answer(title, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
     async def _send_presets_menu(self, message: Message) -> None:
         await message.answer(
-            "Пресеты",
+            "Раздел: Пресеты",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="Добавить текстовый пресет", callback_data="preset:add_text")],
                     [InlineKeyboardButton(text="Добавить SSH-ключ", callback_data="preset:add_key")],
                     [InlineKeyboardButton(text="Список пресетов", callback_data="preset:list")],
                     [InlineKeyboardButton(text="Удалить пресет", callback_data="preset:delete")],
-                    [InlineKeyboardButton(text="Назад", callback_data="menu:main")],
+                    self._home_row(),
                 ]
             ),
         )
@@ -643,7 +725,7 @@ class BotController:
             [InlineKeyboardButton(text=field, callback_data=f"preset:text_field:{field}")]
             for field in TEXT_PRESET_FIELDS
         ]
-        rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
+        rows.append(self._cancel_row())
         await message.answer("Для какого поля пресет?", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
     async def _ask_delete_preset_field(self, message: Message) -> None:
@@ -651,7 +733,7 @@ class BotController:
             [InlineKeyboardButton(text=field, callback_data=f"preset:delete_field:{field}")]
             for field in ("name", "user", "host", "port", "ssh_key")
         ]
-        rows.append([InlineKeyboardButton(text="Отмена", callback_data="presets:menu")])
+        rows.append(self._back_home_row("presets:menu"))
         await message.answer("Пресеты какого поля удалить?", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
     async def _send_delete_preset_items(self, message: Message, user_id: int, field: str) -> None:
@@ -664,7 +746,7 @@ class BotController:
         for preset in presets:
             token = self._remember_ref(user_id, (field, preset.name))
             rows.append([InlineKeyboardButton(text=preset.name, callback_data=f"preset:delete_item:{token}")])
-        rows.append([InlineKeyboardButton(text="Назад", callback_data="presets:menu")])
+        rows.append(self._back_home_row("presets:menu"))
         await message.answer("Выбери пресет.", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
     async def _send_presets_list(self, message: Message) -> None:
@@ -677,7 +759,10 @@ class BotController:
         for preset in presets:
             value = "stored private key" if preset.field == "ssh_key" else preset.value
             lines.append(f"- {preset.field}/{preset.name}: {value}")
-        await message.answer("\n".join(lines), reply_markup=self._main_keyboard())
+        await message.answer(
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[self._back_home_row("presets:menu")]),
+        )
 
     async def _run_node_action(self, message: Message, action: str, target: str) -> None:
         if action == "update":
@@ -750,33 +835,51 @@ class BotController:
 
         if field == "port":
             rows.insert(0, [InlineKeyboardButton(text="22", callback_data="add:val:port:22")])
+        if field == "auth":
+            rows.extend(
+                [
+                    [InlineKeyboardButton(text="SSH-ключ", callback_data="add:auth:key")],
+                    [InlineKeyboardButton(text="Пароль", callback_data="add:auth:password")],
+                ]
+            )
         if field == "ssh_key":
-            rows.append([InlineKeyboardButton(text="Без ключа", callback_data="add:skip_key")])
+            rows.append([InlineKeyboardButton(text="Назад к способу входа", callback_data="add:back_auth")])
+        if field == "password":
+            rows.append([InlineKeyboardButton(text="Назад к способу входа", callback_data="add:back_auth")])
 
-        rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
+        rows.append(self._cancel_row())
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
     @staticmethod
     def _main_keyboard() -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="Добавить ноду", callback_data="add:start")],
                 [
-                    InlineKeyboardButton(text="Ноды", callback_data="nodes:list"),
+                    InlineKeyboardButton(text="Ноды", callback_data="nodes:menu"),
                     InlineKeyboardButton(text="Операции", callback_data="ops:menu"),
                 ],
-                [
-                    InlineKeyboardButton(text="Выполнить команду", callback_data="cmd:start"),
-                    InlineKeyboardButton(text="Пресеты", callback_data="presets:menu"),
-                ],
+                [InlineKeyboardButton(text="Пресеты", callback_data="presets:menu")],
             ]
         )
 
     @staticmethod
     def _cancel_keyboard() -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")]]
-        )
+        return InlineKeyboardMarkup(inline_keyboard=[BotController._cancel_row()])
+
+    @staticmethod
+    def _home_row() -> list[InlineKeyboardButton]:
+        return [InlineKeyboardButton(text="Главное меню", callback_data="menu:main")]
+
+    @staticmethod
+    def _cancel_row() -> list[InlineKeyboardButton]:
+        return [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")]
+
+    @staticmethod
+    def _back_home_row(back_callback: str) -> list[InlineKeyboardButton]:
+        return [
+            InlineKeyboardButton(text="Назад", callback_data=back_callback),
+            InlineKeyboardButton(text="Главное меню", callback_data="menu:main"),
+        ]
 
     @staticmethod
     def _next_add_step(field: str) -> str | None:

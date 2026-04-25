@@ -19,6 +19,7 @@ polling or webhook mode.
 - Add nodes with a step-by-step inline wizard.
 - Add, list and delete nodes.
 - Upload per-node SSH private keys through the bot.
+- Use SSH password auth when adding a node.
 - Add presets for node name, user, host, port and SSH key.
 - Run Ansible ping against one node or all nodes.
 - Update RemnaNode on one node or all nodes.
@@ -66,12 +67,15 @@ shell command or private key.
 Main menu buttons:
 
 ```text
-Добавить ноду
 Ноды
 Операции
-Выполнить команду
 Пресеты
 ```
+
+`Ноды` contains adding nodes, node list and per-node actions. `Операции`
+contains update, ping and shell commands. `Пресеты` contains saved wizard values.
+Nested screens include navigation buttons back to the previous section and to the
+main menu.
 
 Telegram may still show its standard Start button for opening the bot. After
 that, use the inline menu.
@@ -85,15 +89,19 @@ Press `Добавить ноду`. The bot asks, one step at a time:
 Пользователь SSH
 IP или hostname
 SSH-порт
-Приватный SSH-ключ
+Способ входа: SSH-ключ или пароль
+Приватный SSH-ключ или SSH-пароль
 ```
 
-Each step accepts manual input. If presets exist for that field, the bot also
-shows buttons that fill the value automatically. The port step always includes a
-`22` button.
+Each text step accepts manual input. If presets exist for that field, the bot
+also shows buttons that fill the value automatically. The port step always
+includes a `22` button.
 
-At the key step, send the private key as text or as a file, choose a saved key
-preset, or press `Без ключа`.
+At the auth step, choose `SSH-ключ` or `Пароль`.
+
+If you choose `SSH-ключ`, send the private key as text or as a file, or choose a
+saved key preset. If you choose `Пароль`, type the SSH password when the bot asks
+for it. Passwords are stored in SQLite.
 
 Uploaded node keys are stored in:
 
@@ -228,4 +236,5 @@ The URL path in `WEBHOOK_URL` must match `WEBHOOK_PATH`.
 - Prefer SSH keys over passwords.
 - Private keys uploaded for nodes are stored in the Docker volume under `/data/ssh_keys`.
 - Private key presets are stored in the Docker volume under `/data/ssh_key_presets`.
+- SSH passwords are stored in the SQLite database.
 - Do not commit `.env`, `ssh_keys` or the SQLite database.
