@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import Settings
-from app.store import Node, NodeStore
+from app.database.store import Node, NodeStore
 
 
 @dataclass(frozen=True)

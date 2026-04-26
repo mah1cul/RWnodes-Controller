@@ -9,7 +9,7 @@ The first built-in operation is RemnaNode update:
 cd /opt/remnanode && docker compose pull && docker compose down && docker compose up -d
 ```
 
-The controller runs inside Docker, stores nodes and presets in SQLite, generates
+The controller runs inside Docker, stores nodes and parameter presets in SQLite, generates
 a temporary Ansible inventory for each operation, and supports Telegram bot
 polling or webhook mode.
 
@@ -20,7 +20,7 @@ polling or webhook mode.
 - Add, list and delete nodes.
 - Upload per-node SSH private keys through the bot.
 - Use SSH password auth when adding a node.
-- Add presets for node name, user, host, port and SSH key.
+- Add parameter presets for node name, user, host, port and SSH key.
 - Run Ansible ping against one node or all nodes.
 - Update RemnaNode on one node or all nodes.
 - Reboot one node or all nodes through a confirmation screen.
@@ -59,6 +59,16 @@ Logs:
 docker compose logs -f rwnodes-controller
 ```
 
+## Project Structure
+
+```text
+app/bot.py                  aiogram Bot/Dispatcher assembly
+app/handlers.py             message and callback handlers registered with @dp decorators
+app/keyboards.py            inline keyboard builders and emoji metadata
+app/database/store.py       SQLite store and models
+app/database/migrations/    SQL migrations applied on startup
+```
+
 ## Telegram UI
 
 The bot uses inline buttons for all working actions. The only text entry points
@@ -70,11 +80,11 @@ Main menu buttons:
 ```text
 Ноды
 Операции
-Пресеты
+Пресеты параметров
 ```
 
 `Ноды` contains adding nodes, node list and per-node actions. `Операции`
-contains predefined playbooks. `Пресеты` contains saved wizard values.
+contains predefined playbooks. `Пресеты параметров` contains saved wizard values.
 Nested screens include navigation buttons back to the previous section and to the
 main menu.
 
@@ -117,20 +127,20 @@ Uploaded node keys are stored in:
 /data/ssh_keys/<node>.key
 ```
 
-## Presets
+## Parameter Presets
 
-Open `Пресеты` from the main menu.
+Open `Пресеты параметров` from the main menu.
 
 Available actions:
 
 ```text
-Добавить текстовый пресет
+Добавить текстовый пресет параметров
 Добавить SSH-ключ
-Список пресетов
-Удалить пресет
+Список пресетов параметров
+Удалить пресет параметров
 ```
 
-Text presets can be created for:
+Text parameter presets can be created for:
 
 ```text
 name

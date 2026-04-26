@@ -10,7 +10,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from app.ansible_runner import AnsibleRunner
 from app.bot import BotController
 from app.config import Settings
-from app.store import NodeStore
+from app.database.store import NodeStore
 
 
 def configure_logging() -> None:
