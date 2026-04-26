@@ -10,6 +10,7 @@ from pathlib import Path
 
 NODE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 PRESET_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
+COUNTRY_CODE_RE = re.compile(r"^[A-Z]{2}$")
 RESERVED_NODE_NAMES = {"all"}
 PRESET_FIELDS = {"name", "user", "host", "port", "ssh_key"}
 
@@ -24,6 +25,7 @@ class Node:
     password: str | None = None
     become: bool = False
     become_password: str | None = None
+    country_code: str | None = None
 
     @property
     def auth_summary(self) -> str:
@@ -60,6 +62,7 @@ class NodeStore:
                     password TEXT,
                     become INTEGER NOT NULL DEFAULT 0,
                     become_password TEXT,
+                    country_code TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -77,6 +80,12 @@ class NodeStore:
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(nodes)").fetchall()
+            }
+            if "country_code" not in columns:
+                conn.execute("ALTER TABLE nodes ADD COLUMN country_code TEXT")
             conn.commit()
 
     def add_or_update(self, node: Node) -> None:
@@ -87,9 +96,9 @@ class NodeStore:
                 """
                 INSERT INTO nodes (
                     name, host, user, port, ssh_key_path, password,
-                    become, become_password, created_at, updated_at
+                    become, become_password, country_code, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     host=excluded.host,
                     user=excluded.user,
@@ -98,6 +107,7 @@ class NodeStore:
                     password=excluded.password,
                     become=excluded.become,
                     become_password=excluded.become_password,
+                    country_code=excluded.country_code,
                     updated_at=excluded.updated_at
                 """,
                 (
@@ -109,6 +119,7 @@ class NodeStore:
                     node.password,
                     int(node.become),
                     node.become_password,
+                    node.country_code,
                     now,
                     now,
                 ),
@@ -213,6 +224,8 @@ class NodeStore:
             raise ValueError("Port must be between 1 and 65535")
         if node.ssh_key_path and node.password:
             raise ValueError("Use either ssh key or password auth, not both")
+        if node.country_code and not COUNTRY_CODE_RE.match(node.country_code):
+            raise ValueError("Country code must be two uppercase letters")
 
     @staticmethod
     def _validate_preset(preset: Preset) -> None:
@@ -234,6 +247,7 @@ class NodeStore:
             password=row["password"],
             become=bool(row["become"]),
             become_password=row["become_password"],
+            country_code=row["country_code"],
         )
 
     @staticmethod

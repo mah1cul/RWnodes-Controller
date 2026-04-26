@@ -56,20 +56,20 @@ class AnsibleRunner:
             ],
         )
 
-    def run_shell(self, target: str, command: str) -> AnsibleResult:
-        if not command.strip():
-            raise ValueError("Command must not be empty")
-
+    def reboot(self, target: str) -> AnsibleResult:
         nodes = self.store.resolve_target(target)
         return self._run_generated_playbook(
-            action="run-shell",
+            action="reboot",
             target=target,
             nodes=nodes,
             tasks=[
                 {
-                    "name": "Run shell command",
-                    "ansible.builtin.shell": command,
-                    "args": {"executable": "/bin/bash"},
+                    "name": "Reboot node and wait for it",
+                    "ansible.builtin.reboot": {
+                        "connect_timeout": 20,
+                        "reboot_timeout": 600,
+                        "test_command": "whoami",
+                    },
                 }
             ],
         )

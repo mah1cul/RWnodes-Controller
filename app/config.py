@@ -45,6 +45,7 @@ class Settings:
     remnanode_playbook_path: Path
     managed_ssh_keys_dir: Path
     ssh_key_presets_dir: Path
+    premium_emoji_mode: bool
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -87,4 +88,5 @@ class Settings:
             ),
             managed_ssh_keys_dir=Path(os.getenv("MANAGED_SSH_KEYS_DIR", "/data/ssh_keys")),
             ssh_key_presets_dir=Path(os.getenv("SSH_KEY_PRESETS_DIR", "/data/ssh_key_presets")),
+            premium_emoji_mode=_parse_bool(os.getenv("PREMIUM_EMOJI_MODE"), False),
         )

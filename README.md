@@ -23,7 +23,8 @@ polling or webhook mode.
 - Add presets for node name, user, host, port and SSH key.
 - Run Ansible ping against one node or all nodes.
 - Update RemnaNode on one node or all nodes.
-- Run arbitrary shell commands through Ansible.
+- Reboot one node or all nodes through a confirmation screen.
+- Detect a node country from the first two letters of its name and show flags.
 - Admin-only access by Telegram numeric user id.
 
 ## Quick Start
@@ -62,7 +63,7 @@ docker compose logs -f rwnodes-controller
 
 The bot uses inline buttons for all working actions. The only text entry points
 are values that the bot explicitly asks for, such as node name, IP address,
-shell command or private key.
+country code or private key.
 
 Main menu buttons:
 
@@ -73,7 +74,7 @@ Main menu buttons:
 ```
 
 `Ноды` contains adding nodes, node list and per-node actions. `Операции`
-contains update, ping and shell commands. `Пресеты` contains saved wizard values.
+contains predefined playbooks. `Пресеты` contains saved wizard values.
 Nested screens include navigation buttons back to the previous section and to the
 main menu.
 
@@ -81,7 +82,7 @@ The main menu also shows a compact node summary:
 
 ```text
 Ноды:
-- RU-1-Node: 100.88.1.3
+- 🇷🇺 RU-1-Node: 100.88.1.3
 ```
 
 Telegram may still show its standard Start button for opening the bot. After
@@ -154,7 +155,7 @@ Open `Ноды` to see saved nodes. Each node has buttons for:
 ```text
 Update
 Ping
-Выполнить команду
+Reboot
 Изменить
 Показать доступ
 Задать ключ
@@ -171,11 +172,18 @@ Ping
 Пользователь
 IP/host
 Порт
+Страна
 Способ входа
 ```
 
 `Показать доступ` sends the saved SSH password or SSH private key into the chat.
 Use it only in a trusted admin chat.
+
+Country is stored as an ISO alpha-2 code such as `RU`, `DE` or `US`. During
+node creation the bot takes the first two letters of the node name and uses them
+as the country when they match a known country code. If there is no match, the
+node is shown with `🏳️‍🌈`. You can change the country later from the node edit
+menu.
 
 ## Operations
 
@@ -184,14 +192,13 @@ Open `Операции` for node-wide actions:
 ```text
 Обновить RemnaNode
 Ping
+Reboot
 ```
 
 After choosing an operation, select either `Все ноды` or a specific node.
 
-## Run Commands
-
-Press `Выполнить команду`, choose the target, then type the shell command when
-the bot asks for it. The command is executed through Ansible.
+`Reboot` is treated as a critical action. The bot shows a warning and requires a
+separate confirmation before Ansible starts the reboot playbook.
 
 ## Configuration
 
@@ -212,6 +219,30 @@ the bot asks for it. The command is executed through Ansible.
 | `WEBHOOK_PORT` | `8080` | Webhook port inside and outside the container. |
 | `WEBHOOK_PATH` | `telegram/webhook` | Webhook URL path. |
 | `WEBHOOK_SECRET_TOKEN` | empty | Optional Telegram webhook secret token. |
+| `PREMIUM_EMOJI_MODE` | `false` | `true` uses hardcoded Telegram custom emoji ids; `false` uses Unicode icons. |
+
+## Premium Emoji Icons
+
+The bot has hardcoded Telegram custom emoji ids for inline button icons:
+
+```env
+PREMIUM_EMOJI_MODE=true
+```
+
+When enabled, the bot probes custom emoji once in the current chat. If Telegram
+rejects the request, for example because the bot owner does not have Telegram
+Premium, the bot disables custom emoji until restart and falls back to regular
+Unicode icons.
+
+For country flags, the bot tries to load custom emoji ids from:
+
+```text
+worldroundflags1_by_fStikBot
+worldroundflags2_by_fStikBot
+```
+
+If those sets cannot be loaded or a flag is not found, the bot uses the regular
+Unicode flag.
 
 ## Polling Mode
 
@@ -254,7 +285,7 @@ The URL path in `WEBHOOK_URL` must match `WEBHOOK_PATH`.
 
 ## Security Notes
 
-- Keep `ADMIN_IDS` strict. The bot can execute shell commands on nodes.
+- Keep `ADMIN_IDS` strict. The bot can run operational Ansible playbooks on nodes.
 - Prefer SSH keys over passwords.
 - Private keys uploaded for nodes are stored in the Docker volume under `/data/ssh_keys`.
 - Private key presets are stored in the Docker volume under `/data/ssh_key_presets`.

@@ -8,6 +8,7 @@ from typing import Any
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ChatAction, ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart
 from aiogram.types import CallbackQuery, Document, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -26,6 +27,74 @@ from app.store import (
 MAX_PRIVATE_KEY_BYTES = 128 * 1024
 ADD_FIELDS = ("name", "user", "host", "port", "auth")
 TEXT_PRESET_FIELDS = ("name", "user", "host", "port")
+DEFAULT_ICONS = {
+    "nodes": "✈️",
+    "ops": "⚙️",
+    "presets": "📦",
+    "add": "➕",
+    "list": "📁",
+    "update": "🔄",
+    "ping": "🛜",
+    "reboot": "⚠️",
+    "edit": "✏️",
+    "secret": "❗️",
+    "key": "📌",
+    "password": "❗️",
+    "delete": "🗑",
+    "back": "⬅️",
+    "home": "🏪",
+    "cancel": "❌",
+    "confirm": "✅",
+    "disabled": "🚫",
+    "down": "⬇️",
+    "warning": "⚠️",
+}
+PREMIUM_ICON_IDS = {
+    "nodes": "5875465628285931233",
+    "ops": "5877260593903177342",
+    "delete": "5879896690210639947",
+    "edit": "5879841310902324730",
+    "confirm": "5776375003280838798",
+    "cancel": "5778527486270770928",
+    "add": "5775937998948404844",
+    "presets": "5924720918826848520",
+    "list": "5875206779196935950",
+    "update": "5845943483382110702",
+    "ping": "5839354140261619193",
+    "disabled": "5872829476143894491",
+    "secret": "5879813604068298387",
+    "warning": "5881702736843511327",
+    "key": "5796440171364749940",
+    "home": "5983399041197675256",
+    "back": "5875082500023258804",
+    "down": "5899757765743615694",
+}
+PREMIUM_FLAG_SETS = (
+    "worldroundflags1_by_fStikBot",
+    "worldroundflags2_by_fStikBot",
+)
+ISO_COUNTRY_CODES = {
+    "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT", "AU", "AW",
+    "AX", "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI", "BJ", "BL", "BM", "BN",
+    "BO", "BQ", "BR", "BS", "BT", "BV", "BW", "BY", "BZ", "CA", "CC", "CD", "CF", "CG",
+    "CH", "CI", "CK", "CL", "CM", "CN", "CO", "CR", "CU", "CV", "CW", "CX", "CY", "CZ",
+    "DE", "DJ", "DK", "DM", "DO", "DZ", "EC", "EE", "EG", "EH", "ER", "ES", "ET", "FI",
+    "FJ", "FK", "FM", "FO", "FR", "GA", "GB", "GD", "GE", "GF", "GG", "GH", "GI", "GL",
+    "GM", "GN", "GP", "GQ", "GR", "GS", "GT", "GU", "GW", "GY", "HK", "HM", "HN", "HR",
+    "HT", "HU", "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR", "IS", "IT", "JE", "JM",
+    "JO", "JP", "KE", "KG", "KH", "KI", "KM", "KN", "KP", "KR", "KW", "KY", "KZ", "LA",
+    "LB", "LC", "LI", "LK", "LR", "LS", "LT", "LU", "LV", "LY", "MA", "MC", "MD", "ME",
+    "MF", "MG", "MH", "MK", "ML", "MM", "MN", "MO", "MP", "MQ", "MR", "MS", "MT", "MU",
+    "MV", "MW", "MX", "MY", "MZ", "NA", "NC", "NE", "NF", "NG", "NI", "NL", "NO", "NP",
+    "NR", "NU", "NZ", "OM", "PA", "PE", "PF", "PG", "PH", "PK", "PL", "PM", "PN", "PR",
+    "PS", "PT", "PW", "PY", "QA", "RE", "RO", "RS", "RU", "RW", "SA", "SB", "SC", "SD",
+    "SE", "SG", "SH", "SI", "SJ", "SK", "SL", "SM", "SN", "SO", "SR", "SS", "ST", "SV",
+    "SX", "SY", "SZ", "TC", "TD", "TF", "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO",
+    "TR", "TT", "TV", "TW", "TZ", "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE",
+    "VG", "VI", "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW",
+}
+COUNTRY_CODE_ALIASES = {"UK": "GB"}
+NO_COUNTRY_FLAG = "🏳️‍🌈"
 
 
 class BotController:
@@ -36,6 +105,10 @@ class BotController:
         self.operation_lock = asyncio.Lock()
         self.sessions: dict[int, dict[str, Any]] = {}
         self.bot: Bot | None = None
+        self.premium_icons_checked = False
+        self.premium_icons_disabled = False
+        self.premium_flag_ids: dict[str, str] = {}
+        self.premium_flags_loaded = False
 
     def build(self) -> tuple[Bot, Dispatcher]:
         bot = Bot(token=self.settings.bot_token)
@@ -54,6 +127,7 @@ class BotController:
         if not await self._require_admin_message(message):
             return
 
+        await self._ensure_premium_emoji_ready(message)
         self._clear_flow(message.from_user.id)
         await self._send_main_menu(message, "RWnodes Controller")
 
@@ -61,6 +135,7 @@ class BotController:
         if not await self._require_admin_message(message):
             return
 
+        await self._ensure_premium_emoji_ready(message)
         user_id = message.from_user.id
         flow = self._session(user_id).get("flow")
         if not flow:
@@ -70,8 +145,6 @@ class BotController:
         flow_type = flow.get("type")
         if flow_type == "add_node":
             await self._handle_add_message(message, flow)
-        elif flow_type == "run_shell":
-            await self._handle_run_shell_message(message, flow)
         elif flow_type == "set_key":
             await self._handle_set_key_message(message, flow)
         elif flow_type == "preset_text":
@@ -95,10 +168,11 @@ class BotController:
             return
 
         await query.answer()
+        await self._ensure_premium_emoji_ready(query.message)
         try:
             await self._dispatch_button(query)
         except ValueError as exc:
-            await query.message.answer(str(exc), reply_markup=self._main_keyboard())
+            await query.message.answer(str(exc), reply_markup=self._main_keyboard(query.from_user.id))
 
     async def _dispatch_button(self, query: CallbackQuery) -> None:
         data = query.data or ""
@@ -137,10 +211,6 @@ class BotController:
             await self._send_operations_menu(message)
         elif data.startswith("op:"):
             await self._handle_operation_button(message, user_id, data)
-        elif data == "cmd:start":
-            await self._send_target_menu(message, user_id, action="run_shell")
-        elif data.startswith("cmd:target:"):
-            await self._handle_run_shell_target(message, user_id, data)
         elif data == "presets:menu":
             await self._send_presets_menu(message)
         elif data.startswith("preset:"):
@@ -310,6 +380,7 @@ class BotController:
             port=int(add_data["port"]),
             ssh_key_path=str(key_path) if key_path else None,
             password=password,
+            country_code=self._infer_country_code(name),
         )
         existing = self.store.get(name)
 
@@ -355,13 +426,9 @@ class BotController:
         elif action in {"update", "ping"}:
             node_name = self._get_ref(user_id, parts[2])
             await self._run_node_action(message, action, node_name)
-        elif action == "run":
+        elif action == "reboot":
             node_name = self._get_ref(user_id, parts[2])
-            self._session(user_id)["flow"] = {"type": "run_shell", "data": {"target": node_name}}
-            await message.answer(
-                f"Напиши shell-команду для {node_name}.",
-                reply_markup=self._cancel_keyboard(),
-            )
+            await self._send_reboot_warning(message, user_id, node_name, back_callback=f"node:open:{parts[2]}")
         elif action == "delete":
             node_name = self._get_ref(user_id, parts[2])
             token = self._remember_ref(user_id, node_name)
@@ -415,6 +482,7 @@ class BotController:
                     password=node.password,
                     become=node.become,
                     become_password=node.become_password,
+                    country_code=node.country_code,
                 )
             )
             await message.answer(
@@ -443,6 +511,7 @@ class BotController:
                 "user": "нового SSH-пользователя",
                 "host": "новый IP или hostname",
                 "port": "новый SSH-порт",
+                "country": "код страны ноды, например RU или DE. Напиши none, чтобы сбросить",
             }
             await message.answer(
                 f"Напиши {labels[field]} для {node_name}.",
@@ -503,8 +572,13 @@ class BotController:
 
     async def _handle_operation_button(self, message: Message, user_id: int, data: str) -> None:
         parts = data.split(":")
-        if parts[1] in {"update", "ping"}:
+        if parts[1] in {"update", "ping", "reboot"}:
             await self._send_target_menu(message, user_id, action=parts[1])
+            return
+
+        if parts[1] == "confirm" and parts[2] == "reboot":
+            target = self._get_ref(user_id, parts[3])
+            await self._run_node_action(message, "reboot", target)
             return
 
         if parts[1] != "target":
@@ -512,27 +586,10 @@ class BotController:
 
         action = parts[2]
         target = "all" if parts[3] == "all" else self._get_ref(user_id, parts[3])
-        await self._run_node_action(message, action, target)
-
-    async def _handle_run_shell_target(self, message: Message, user_id: int, data: str) -> None:
-        token = data.split(":", 2)[2]
-        target = "all" if token == "all" else self._get_ref(user_id, token)
-        self._session(user_id)["flow"] = {"type": "run_shell", "data": {"target": target}}
-        await message.answer(f"Напиши shell-команду для {target}.", reply_markup=self._cancel_keyboard())
-
-    async def _handle_run_shell_message(self, message: Message, flow: dict[str, Any]) -> None:
-        command = (message.text or "").strip()
-        target = flow.get("data", {}).get("target")
-        if not command:
-            await message.answer("Команда не должна быть пустой.")
+        if action == "reboot":
+            await self._send_reboot_warning(message, user_id, target, back_callback="ops:menu")
             return
-
-        self._clear_flow(message.from_user.id)
-        await self._run_ansible_action(
-            message,
-            label=f"Выполняю команду на {target}",
-            action=lambda: self.runner.run_shell(target, command),
-        )
+        await self._run_node_action(message, action, target)
 
     async def _handle_set_key_message(self, message: Message, flow: dict[str, Any]) -> None:
         node_name = flow.get("data", {}).get("node")
@@ -562,6 +619,7 @@ class BotController:
                     password=None,
                     become=node.become,
                     become_password=node.become_password,
+                    country_code=node.country_code,
                 )
             )
         except (OSError, ValueError) as exc:
@@ -585,7 +643,10 @@ class BotController:
             return
 
         try:
-            value = self._validate_add_value(field, message.text or "")
+            if field == "country":
+                value = self._validate_country_code_value(message.text or "")
+            else:
+                value = self._validate_add_value(field, message.text or "")
             updated_node = self._updated_node(node, field, value)
             if field == "name" and value != node.name and self.store.get(value):
                 raise ValueError("нода с таким названием уже существует")
@@ -624,6 +685,7 @@ class BotController:
                 password=password,
                 become=node.become,
                 become_password=node.become_password,
+                country_code=node.country_code,
             )
         )
         self._clear_flow(message.from_user.id)
@@ -762,7 +824,9 @@ class BotController:
         if nodes:
             node_lines = ["\nНоды:"]
             for node in nodes[:20]:
-                node_lines.append(f"- {node.name}: {node.host}")
+                node_lines.append(
+                    f"- {self._node_flag_html(node)} {html.escape(node.name)}: {html.escape(node.host)}"
+                )
             if len(nodes) > 20:
                 node_lines.append(f"... и еще {len(nodes) - 20}")
             nodes_text = "\n".join(node_lines)
@@ -771,22 +835,23 @@ class BotController:
 
         body = (
             f"{text}\n\n"
-            "Разделы:\n"
-            "Ноды - добавление, список и действия с конкретной нодой.\n"
-            "Операции - массовый update, ping и выполнение команд.\n"
-            "Пресеты - сохраненные значения для мастера добавления."
             f"{nodes_text}"
         )
-        await message.answer(body, reply_markup=self._main_keyboard())
+        await message.answer(
+            body,
+            parse_mode=ParseMode.HTML,
+            reply_markup=self._main_keyboard(message.from_user.id),
+        )
 
     async def _send_nodes_section(self, message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else None
         await message.answer(
             "Раздел: Ноды",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="Добавить ноду", callback_data="add:start")],
-                    [InlineKeyboardButton(text="Список нод", callback_data="nodes:list")],
-                    self._home_row(),
+                    [self._button("Добавить ноду", "add:start", icon="add", user_id=user_id)],
+                    [self._button("Список нод", "nodes:list", icon="list", user_id=user_id)],
+                    self._home_row(user_id),
                 ]
             ),
         )
@@ -800,12 +865,29 @@ class BotController:
         lines = ["Ноды:"]
         rows: list[list[InlineKeyboardButton]] = []
         for node in nodes:
-            lines.append(f"- {node.name}: {node.user}@{node.host}:{node.port} ({node.auth_summary})")
+            lines.append(
+                f"- {self._node_flag_html(node)} {html.escape(node.name)}: "
+                f"{html.escape(node.user)}@{html.escape(node.host)}:{node.port} ({node.auth_summary})"
+            )
             token = self._remember_ref(user_id, node.name)
-            rows.append([InlineKeyboardButton(text=node.name, callback_data=f"node:open:{token}")])
+            rows.append(
+                [
+                    self._button(
+                        node.name,
+                        f"node:open:{token}",
+                        user_id=user_id,
+                        fallback_icon=self._node_flag_text(node),
+                        custom_emoji_id=self._node_flag_custom_emoji_id(node),
+                    )
+                ]
+            )
 
-        rows.append(self._back_home_row("nodes:menu"))
-        await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        rows.append(self._back_home_row("nodes:menu", user_id))
+        await message.answer(
+            "\n".join(lines),
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
 
     async def _send_node_details(self, message: Message, user_id: int, node_name: str) -> None:
         node = self.store.get(node_name)
@@ -814,31 +896,34 @@ class BotController:
             return
 
         token = self._remember_ref(user_id, node.name)
+        country_code = self._node_country_code(node)
+        country_text = country_code or "не задана"
         text = (
-            f"{node.name}\n"
-            f"SSH: {node.user}@{node.host}:{node.port}\n"
+            f"{self._node_flag_html(node)} {html.escape(node.name)}\n"
+            f"SSH: {html.escape(node.user)}@{html.escape(node.host)}:{node.port}\n"
+            f"Страна: {html.escape(country_text)}\n"
             f"Auth: {node.auth_summary}"
         )
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="Update", callback_data=f"node:update:{token}"),
-                    InlineKeyboardButton(text="Ping", callback_data=f"node:ping:{token}"),
+                    self._button("Update", f"node:update:{token}", icon="update", user_id=user_id),
+                    self._button("Ping", f"node:ping:{token}", icon="ping", user_id=user_id),
                 ],
-                [InlineKeyboardButton(text="Выполнить команду", callback_data=f"node:run:{token}")],
+                [self._button("Reboot", f"node:reboot:{token}", icon="reboot", user_id=user_id)],
                 [
-                    InlineKeyboardButton(text="Изменить", callback_data=f"node:edit:{token}"),
-                    InlineKeyboardButton(text="Показать доступ", callback_data=f"node:secret:{token}"),
+                    self._button("Изменить", f"node:edit:{token}", icon="edit", user_id=user_id),
+                    self._button("Показать доступ", f"node:secret:{token}", icon="secret", user_id=user_id),
                 ],
                 [
-                    InlineKeyboardButton(text="Задать ключ", callback_data=f"node:setkey:{token}"),
-                    InlineKeyboardButton(text="Убрать ключ", callback_data=f"node:clearkey:{token}"),
+                    self._button("Задать ключ", f"node:setkey:{token}", icon="key", user_id=user_id),
+                    self._button("Убрать ключ", f"node:clearkey:{token}", icon="key", user_id=user_id),
                 ],
-                [InlineKeyboardButton(text="Удалить", callback_data=f"node:delete:{token}")],
-                self._back_home_row("nodes:list"),
+                [self._button("Удалить", f"node:delete:{token}", icon="delete", user_id=user_id)],
+                self._back_home_row("nodes:list", user_id),
             ]
         )
-        await message.answer(text, reply_markup=keyboard)
+        await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
     async def _send_edit_node_menu(self, message: Message, user_id: int, node_name: str) -> None:
         node = self.store.get(node_name)
@@ -859,6 +944,7 @@ class BotController:
                         InlineKeyboardButton(text="IP/host", callback_data=f"edit:field:host:{token}"),
                         InlineKeyboardButton(text="Порт", callback_data=f"edit:field:port:{token}"),
                     ],
+                    [InlineKeyboardButton(text="Страна", callback_data=f"edit:field:country:{token}")],
                     [InlineKeyboardButton(text="Способ входа", callback_data=f"edit:auth:{token}")],
                     self._back_home_row(f"node:open:{token}"),
                 ]
@@ -905,14 +991,15 @@ class BotController:
         )
 
     async def _send_operations_menu(self, message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else None
         await message.answer(
             "Раздел: Операции",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="Обновить RemnaNode", callback_data="op:update")],
-                    [InlineKeyboardButton(text="Ping", callback_data="op:ping")],
-                    [InlineKeyboardButton(text="Выполнить команду", callback_data="cmd:start")],
-                    self._home_row(),
+                    [self._button("Обновить RemnaNode", "op:update", icon="update", user_id=user_id)],
+                    [self._button("Ping", "op:ping", icon="ping", user_id=user_id)],
+                    [self._button("Reboot", "op:reboot", icon="reboot", user_id=user_id)],
+                    self._home_row(user_id),
                 ]
             ),
         )
@@ -923,30 +1010,37 @@ class BotController:
             await message.answer("Ноды пока не добавлены.", reply_markup=self._main_keyboard())
             return
 
-        if action == "run_shell":
-            prefix = "cmd:target"
-            title = "Где выполнить команду?"
-        else:
-            prefix = f"op:target:{action}"
-            title = "Выбери цель."
+        prefix = f"op:target:{action}"
+        title = "Выбери цель."
 
-        rows = [[InlineKeyboardButton(text="Все ноды", callback_data=f"{prefix}:all")]]
+        rows = [[self._button("Все ноды", f"{prefix}:all", icon="nodes", user_id=user_id)]]
         for node in nodes:
             token = self._remember_ref(user_id, node.name)
-            rows.append([InlineKeyboardButton(text=node.name, callback_data=f"{prefix}:{token}")])
-        rows.append(self._back_home_row("ops:menu"))
+            rows.append(
+                [
+                    self._button(
+                        node.name,
+                        f"{prefix}:{token}",
+                        user_id=user_id,
+                        fallback_icon=self._node_flag_text(node),
+                        custom_emoji_id=self._node_flag_custom_emoji_id(node),
+                    )
+                ]
+            )
+        rows.append(self._back_home_row("ops:menu", user_id))
         await message.answer(title, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
     async def _send_presets_menu(self, message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else None
         await message.answer(
             "Раздел: Пресеты",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="Добавить текстовый пресет", callback_data="preset:add_text")],
-                    [InlineKeyboardButton(text="Добавить SSH-ключ", callback_data="preset:add_key")],
-                    [InlineKeyboardButton(text="Список пресетов", callback_data="preset:list")],
-                    [InlineKeyboardButton(text="Удалить пресет", callback_data="preset:delete")],
-                    self._home_row(),
+                    [self._button("Добавить текстовый пресет", "preset:add_text", icon="add", user_id=user_id)],
+                    [self._button("Добавить SSH-ключ", "preset:add_key", icon="key", user_id=user_id)],
+                    [self._button("Список пресетов", "preset:list", icon="list", user_id=user_id)],
+                    [self._button("Удалить пресет", "preset:delete", icon="delete", user_id=user_id)],
+                    self._home_row(user_id),
                 ]
             ),
         )
@@ -995,6 +1089,29 @@ class BotController:
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[self._back_home_row("presets:menu")]),
         )
 
+    async def _send_reboot_warning(
+        self,
+        message: Message,
+        user_id: int,
+        target: str,
+        back_callback: str,
+    ) -> None:
+        token = self._remember_ref(user_id, target)
+        await message.answer(
+            (
+                f"{DEFAULT_ICONS['warning']} Критическое действие\n\n"
+                f"Цель: {html.escape(target)}\n"
+                "Нода будет перезагружена через Ansible. Во время reboot соединение и сервисы могут быть недоступны."
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [self._button("Подтвердить reboot", f"op:confirm:reboot:{token}", icon="warning", user_id=user_id)],
+                    self._back_home_row(back_callback, user_id),
+                ]
+            ),
+        )
+
     async def _run_node_action(self, message: Message, action: str, target: str) -> None:
         if action == "update":
             await self._run_ansible_action(
@@ -1007,6 +1124,12 @@ class BotController:
                 message,
                 label=f"Проверяю доступ к {target}",
                 action=lambda: self.runner.ping(target),
+            )
+        elif action == "reboot":
+            await self._run_ansible_action(
+                message,
+                label=f"Перезагружаю {target}",
+                action=lambda: self.runner.reboot(target),
             )
 
     async def _run_ansible_action(self, message: Message, label: str, action) -> None:
@@ -1078,6 +1201,146 @@ class BotController:
             await query.message.answer(f"Доступ запрещен. Telegram user id: {user.id if user else 'unknown'}")
         return False
 
+    async def _ensure_premium_emoji_ready(self, message: Message) -> None:
+        if not self.settings.premium_emoji_mode or self.premium_icons_disabled:
+            return
+
+        if not self.premium_icons_checked:
+            self.premium_icons_checked = True
+            try:
+                rows = []
+                for key in PREMIUM_ICON_IDS:
+                    rows.append([self._button(DEFAULT_ICONS.get(key, key), "menu:main", icon=key)])
+                sent = await message.answer("Проверка premium emoji", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+                try:
+                    await sent.delete()
+                except Exception:
+                    pass
+            except TelegramBadRequest:
+                self.premium_icons_disabled = True
+                return
+
+        await self._load_premium_flag_ids()
+
+    async def _load_premium_flag_ids(self) -> None:
+        if self.premium_flags_loaded or not self._can_use_premium_icons():
+            return
+
+        self.premium_flags_loaded = True
+        bot = self._bot()
+        for set_name in PREMIUM_FLAG_SETS:
+            try:
+                sticker_set = await bot.get_sticker_set(set_name)
+            except Exception:
+                continue
+
+            for sticker in sticker_set.stickers:
+                custom_emoji_id = getattr(sticker, "custom_emoji_id", None)
+                emoji = getattr(sticker, "emoji", None)
+                country_code = self._country_code_from_flag_emoji(emoji or "")
+                if custom_emoji_id and country_code:
+                    self.premium_flag_ids.setdefault(country_code, custom_emoji_id)
+
+    def _can_use_premium_icons(self) -> bool:
+        return self.settings.premium_emoji_mode and not self.premium_icons_disabled
+
+    def _icon(self, key: str, user_id: int | None = None, fallback_icon: str | None = None) -> str:
+        if self._can_use_premium_icons():
+            return ""
+        icon = fallback_icon if fallback_icon is not None else DEFAULT_ICONS.get(key, "")
+        return f"{icon} " if icon else ""
+
+    def _button(
+        self,
+        text: str,
+        callback_data: str,
+        icon: str | None = None,
+        user_id: int | None = None,
+        fallback_icon: str | None = None,
+        custom_emoji_id: str | None = None,
+    ) -> InlineKeyboardButton:
+        if self._can_use_premium_icons():
+            custom_emoji_id = custom_emoji_id or (PREMIUM_ICON_IDS.get(icon or "") if icon else None)
+            if custom_emoji_id:
+                try:
+                    return InlineKeyboardButton(
+                        text=text,
+                        callback_data=callback_data,
+                        icon_custom_emoji_id=custom_emoji_id,
+                    )
+                except Exception:
+                    self.premium_icons_disabled = True
+
+        return InlineKeyboardButton(
+            text=f"{self._icon(icon or '', user_id, fallback_icon=fallback_icon)}{text}",
+            callback_data=callback_data,
+        )
+
+    def _node_country_code(self, node: Node) -> str | None:
+        return node.country_code or self._infer_country_code(node.name)
+
+    def _node_flag_text(self, node: Node) -> str:
+        country_code = self._node_country_code(node)
+        return self._country_flag_emoji(country_code) if country_code else NO_COUNTRY_FLAG
+
+    def _node_flag_custom_emoji_id(self, node: Node) -> str | None:
+        if not self._can_use_premium_icons():
+            return None
+        country_code = self._node_country_code(node)
+        if not country_code:
+            return None
+        return self.premium_flag_ids.get(country_code)
+
+    def _node_flag_html(self, node: Node) -> str:
+        flag = self._node_flag_text(node)
+        custom_emoji_id = self._node_flag_custom_emoji_id(node)
+        if custom_emoji_id:
+            return f'<tg-emoji emoji-id="{html.escape(custom_emoji_id)}">{flag}</tg-emoji>'
+        return flag
+
+    @classmethod
+    def _infer_country_code(cls, name: str) -> str | None:
+        prefix = name.strip()[:2].upper()
+        if len(prefix) != 2 or not prefix.isalpha():
+            return None
+        return cls._normalize_country_code(prefix)
+
+    @staticmethod
+    def _normalize_country_code(value: str) -> str | None:
+        code = value.strip().upper()
+        if code in {"", "-", "NONE", "NO", "OFF", "NULL"}:
+            return None
+        code = COUNTRY_CODE_ALIASES.get(code, code)
+        return code if code in ISO_COUNTRY_CODES else None
+
+    @classmethod
+    def _validate_country_code_value(cls, raw_value: str | None) -> str:
+        code = cls._normalize_country_code(raw_value or "")
+        if code is None:
+            raw = (raw_value or "").strip().upper()
+            if raw in {"", "-", "NONE", "NO", "OFF", "NULL"}:
+                return ""
+            raise ValueError("код страны должен быть ISO alpha-2, например RU, DE или US")
+        return code
+
+    @staticmethod
+    def _country_flag_emoji(country_code: str | None) -> str:
+        if not country_code:
+            return NO_COUNTRY_FLAG
+        return "".join(chr(0x1F1E6 + ord(char) - ord("A")) for char in country_code[:2])
+
+    @staticmethod
+    def _country_code_from_flag_emoji(flag: str) -> str | None:
+        values: list[int] = []
+        for char in flag:
+            value = ord(char) - 0x1F1E6
+            if 0 <= value <= 25:
+                values.append(value)
+        if len(values) < 2:
+            return None
+        code = "".join(chr(ord("A") + value) for value in values[:2])
+        return code if code in ISO_COUNTRY_CODES else None
+
     def _add_step_keyboard(self, user_id: int, field: str) -> InlineKeyboardMarkup:
         rows: list[list[InlineKeyboardButton]] = []
         for preset in self.store.list_presets(field):
@@ -1101,35 +1364,34 @@ class BotController:
         rows.append(self._cancel_row())
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    @staticmethod
-    def _main_keyboard() -> InlineKeyboardMarkup:
+    def _main_keyboard(self, user_id: int | None = None) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="Ноды", callback_data="nodes:menu"),
-                    InlineKeyboardButton(text="Операции", callback_data="ops:menu"),
+                    self._button("Ноды", "nodes:menu", icon="nodes", user_id=user_id),
+                    self._button("Операции", "ops:menu", icon="ops", user_id=user_id),
                 ],
-                [InlineKeyboardButton(text="Пресеты", callback_data="presets:menu")],
+                [self._button("Пресеты", "presets:menu", icon="presets", user_id=user_id)],
             ]
         )
 
-    @staticmethod
-    def _cancel_keyboard() -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup(inline_keyboard=[BotController._cancel_row()])
+    def _cancel_keyboard(self, user_id: int | None = None) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[self._cancel_row(user_id)])
 
-    @staticmethod
-    def _home_row() -> list[InlineKeyboardButton]:
-        return [InlineKeyboardButton(text="Главное меню", callback_data="menu:main")]
+    def _home_row(self, user_id: int | None = None) -> list[InlineKeyboardButton]:
+        return [self._button("Главное меню", "menu:main", icon="home", user_id=user_id)]
 
-    @staticmethod
-    def _cancel_row() -> list[InlineKeyboardButton]:
-        return [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")]
+    def _cancel_row(self, user_id: int | None = None) -> list[InlineKeyboardButton]:
+        return [self._button("Отмена", "flow:cancel", icon="cancel", user_id=user_id)]
 
-    @staticmethod
-    def _back_home_row(back_callback: str) -> list[InlineKeyboardButton]:
+    def _back_home_row(
+        self,
+        back_callback: str,
+        user_id: int | None = None,
+    ) -> list[InlineKeyboardButton]:
         return [
-            InlineKeyboardButton(text="Назад", callback_data=back_callback),
-            InlineKeyboardButton(text="Главное меню", callback_data="menu:main"),
+            self._button("Назад", back_callback, icon="back", user_id=user_id),
+            self._button("Главное меню", "menu:main", icon="home", user_id=user_id),
         ]
 
     @staticmethod
@@ -1172,11 +1434,16 @@ class BotController:
             "password": node.password,
             "become": node.become,
             "become_password": node.become_password,
+            "country_code": node.country_code,
         }
         if field == "port":
             values[field] = int(value)
         elif field in {"name", "user", "host"}:
             values[field] = value
+            if field == "name" and not node.country_code:
+                values["country_code"] = self._infer_country_code(value)
+        elif field == "country":
+            values["country_code"] = value or None
         else:
             raise ValueError(f"неизвестное поле {field}")
 
@@ -1202,6 +1469,7 @@ class BotController:
                 password=new_node.password,
                 become=new_node.become,
                 become_password=new_node.become_password,
+                country_code=new_node.country_code,
             )
 
         key_was_moved = False
