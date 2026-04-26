@@ -16,6 +16,7 @@ DEFAULT_ICONS = {
     "secret": "❗️",
     "key": "📌",
     "password": "❗️",
+    "api": "🔑",
     "delete": "🗑",
     "back": "⬅️",
     "home": "🏪",
@@ -40,12 +41,13 @@ PREMIUM_ICON_IDS = {
     "disabled": "5872829476143894491",
     "secret": "5879813604068298387",
     "warning": "5881702736843511327",
-    "key": "5796440171364749940",
+    "key": "6005570495603282482",
     "home": "5983399041197675256",
     "back": "5875082500023258804",
     "down": "5899757765743615694",
     "reboot": "5877410604225924969",
     "password": "5877396173135811032",
+    "api": "6005570495603282482",
 }
 PREMIUM_FLAG_SETS = (
     "worldroundflags1_by_fStikBot",
@@ -139,6 +141,7 @@ class KeyboardMixin:
                     self._button("Операции", "ops:menu", icon="ops", user_id=user_id),
                 ],
                 [self._button("Пресеты параметров", "presets:menu", icon="presets", user_id=user_id)],
+                [self._button("API ключи", "api:menu", icon="api", user_id=user_id)],
             ]
         )
 

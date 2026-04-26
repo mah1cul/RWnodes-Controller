@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import re
+import hashlib
+import hmac
+import secrets
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -10,6 +13,7 @@ from pathlib import Path
 
 NODE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 PRESET_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
+API_KEY_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
 COUNTRY_CODE_RE = re.compile(r"^[A-Z]{2}$")
 RESERVED_NODE_NAMES = {"all"}
 PRESET_FIELDS = {"name", "user", "host", "port", "ssh_key"}
@@ -42,6 +46,12 @@ class Preset:
     field: str
     name: str
     value: str
+
+
+@dataclass(frozen=True)
+class ApiKey:
+    name: str
+    created_at: str
 
 
 class NodeStore:
@@ -84,7 +94,7 @@ class NodeStore:
             )
 
     def add_or_update(self, node: Node) -> None:
-        self._validate_node(node)
+        self.validate_node(node)
         now = datetime.now(UTC).isoformat()
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -200,10 +210,57 @@ class NodeStore:
             conn.commit()
         return preset
 
+    def create_api_key(self, name: str) -> str:
+        self._validate_api_key_name(name)
+        raw_key = secrets.token_urlsafe(32)
+        key_hash = self._api_key_hash(raw_key)
+        now = datetime.now(UTC).isoformat()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO api_keys (name, key_hash, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    key_hash=excluded.key_hash,
+                    created_at=excluded.created_at
+                """,
+                (name, key_hash, now),
+            )
+            conn.commit()
+        return raw_key
+
+    def list_api_keys(self) -> list[ApiKey]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute("SELECT name, created_at FROM api_keys ORDER BY name").fetchall()
+        return [ApiKey(name=row["name"], created_at=row["created_at"]) for row in rows]
+
+    def has_api_keys(self) -> bool:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT 1 FROM api_keys LIMIT 1").fetchone()
+        return row is not None
+
+    def verify_api_key(self, raw_key: str | None) -> bool:
+        if not raw_key:
+            return False
+        key_hash = self._api_key_hash(raw_key.strip())
+        with self._lock, self._connect() as conn:
+            rows = conn.execute("SELECT key_hash FROM api_keys").fetchall()
+        return any(hmac.compare_digest(key_hash, row["key_hash"]) for row in rows)
+
+    def delete_api_key(self, name: str) -> bool:
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute("DELETE FROM api_keys WHERE name = ?", (name,))
+            conn.commit()
+            return cursor.rowcount > 0
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    @classmethod
+    def validate_node(cls, node: Node) -> None:
+        cls._validate_node(node)
 
     @staticmethod
     def _validate_node(node: Node) -> None:
@@ -230,6 +287,15 @@ class NodeStore:
             raise ValueError("Preset name must be 1-32 chars: letters, numbers, '.', '_' or '-'")
         if not preset.value.strip():
             raise ValueError("Preset value must not be empty")
+
+    @staticmethod
+    def _validate_api_key_name(name: str) -> None:
+        if not API_KEY_NAME_RE.match(name):
+            raise ValueError("API key name must be 1-32 chars: letters, numbers, '.', '_' or '-'")
+
+    @staticmethod
+    def _api_key_hash(raw_key: str) -> str:
+        return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _row_to_node(row: sqlite3.Row) -> Node:

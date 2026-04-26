@@ -108,6 +108,8 @@ class BotHandlers(KeyboardMixin):
             await self._handle_text_preset_message(message, flow)
         elif flow_type == "preset_key":
             await self._handle_key_preset_message(message, flow)
+        elif flow_type == "api_key":
+            await self._handle_api_key_message(message, flow)
         elif flow_type == "edit_node":
             await self._handle_edit_node_message(message, flow)
         elif flow_type == "edit_password":
@@ -142,6 +144,12 @@ class BotHandlers(KeyboardMixin):
         elif data == "flow:cancel":
             self._clear_flow(user_id)
             await self._send_main_menu(message, "Действие отменено.")
+        elif data == "add:menu":
+            self._clear_flow(user_id)
+            await self._send_add_method_menu(message)
+        elif data == "add:script":
+            self._clear_flow(user_id)
+            await self._send_add_script_instructions(message)
         elif data == "add:start":
             await self._begin_add_wizard(message, user_id)
         elif data.startswith("add:val:"):
@@ -172,6 +180,10 @@ class BotHandlers(KeyboardMixin):
             await self._send_presets_menu(message)
         elif data.startswith("preset:"):
             await self._handle_preset_button(message, user_id, data)
+        elif data == "api:menu":
+            await self._send_api_keys_menu(message)
+        elif data.startswith("api:"):
+            await self._handle_api_key_button(message, user_id, data)
         else:
             await self._send_main_menu(message, "Кнопка устарела. Выбери действие заново.")
 
@@ -776,6 +788,60 @@ class BotHandlers(KeyboardMixin):
         self._clear_flow(message.from_user.id)
         await message.answer(f"Пресет SSH-ключа сохранен: {data['name']}", reply_markup=self._main_keyboard())
 
+    async def _handle_api_key_button(self, message: Message, user_id: int, data: str) -> None:
+        parts = data.split(":")
+        action = parts[1]
+
+        if action == "add":
+            self._session(user_id)["flow"] = {"type": "api_key"}
+            await message.answer("Название API ключа? Например: node-register", reply_markup=self._cancel_keyboard())
+        elif action == "list":
+            await self._send_api_keys_list(message)
+        elif action == "delete":
+            await self._send_delete_api_key_items(message, user_id)
+        elif action == "delete_item":
+            key_name = self._get_ref(user_id, parts[2])
+            token = self._remember_ref(user_id, key_name)
+            await message.answer(
+                f"Удалить API ключ {key_name}?",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [self._button("Удалить", f"api:delete_yes:{token}", icon="delete", user_id=user_id)],
+                        self._back_home_row("api:menu", user_id),
+                    ]
+                ),
+            )
+        elif action == "delete_yes":
+            key_name = self._get_ref(user_id, parts[2])
+            deleted = self.store.delete_api_key(key_name)
+            if deleted:
+                await message.answer(f"API ключ удален: {key_name}", reply_markup=self._main_keyboard(user_id))
+            else:
+                await message.answer("API ключ не найден.", reply_markup=self._main_keyboard(user_id))
+
+    async def _handle_api_key_message(self, message: Message, flow: dict[str, Any]) -> None:
+        name = (message.text or "").strip()
+        if not name:
+            await message.answer("Название API ключа не должно быть пустым.", reply_markup=self._cancel_keyboard())
+            return
+
+        try:
+            raw_key = self.store.create_api_key(name)
+        except ValueError as exc:
+            await message.answer(f"API ключ не создан: {exc}", reply_markup=self._cancel_keyboard())
+            return
+
+        self._clear_flow(message.from_user.id)
+        await message.answer(
+            (
+                f"API ключ создан: {html.escape(name)}\n\n"
+                "Сохрани его сейчас, потом в боте будет виден только список имен:\n"
+                f"<pre>{html.escape(raw_key)}</pre>"
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=self._main_keyboard(message.from_user.id),
+        )
+
     async def _send_main_menu(self, message: Message, text: str = "Главное меню") -> None:
         nodes = self.store.list()
         if nodes:
@@ -806,9 +872,72 @@ class BotHandlers(KeyboardMixin):
             "Раздел: Ноды",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [self._button("Добавить ноду", "add:start", icon="add", user_id=user_id)],
+                    [self._button("Добавить ноду", "add:menu", icon="add", user_id=user_id)],
                     [self._button("Список нод", "nodes:list", icon="list", user_id=user_id)],
                     self._home_row(user_id),
+                ]
+            ),
+        )
+
+    async def _send_add_method_menu(self, message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else None
+        await message.answer(
+            "Как добавить ноду?",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [self._button("Добавить вручную", "add:start", icon="edit", user_id=user_id)],
+                    [self._button("Скрипт добавления", "add:script", icon="api", user_id=user_id)],
+                    self._back_home_row("nodes:menu", user_id),
+                ]
+            ),
+        )
+
+    async def _send_add_script_instructions(self, message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else None
+        base_url = self._public_controller_url()
+        script_url = f"{base_url}/scripts/addnode"
+        api_key_arg = " --apikey APIKEY" if self.store.has_api_keys() else ""
+        placeholder_note = ""
+        if not self.settings.webhook_url:
+            placeholder_note = (
+                "\n\nWEBHOOK_URL не задан, поэтому в примерах стоит домен-заглушка. "
+                "Замени его на публичный адрес, который видит добавляемая нода."
+            )
+
+        key_command = (
+            f"curl -fsSL {script_url} | sudo bash -s -- "
+            f"--url {base_url} -U root --key /root/.ssh/id_ed25519{api_key_arg}"
+        )
+        password_command = (
+            f"curl -fsSL {script_url} | sudo bash -s -- "
+            f"--url {base_url} -U root --pass 'SSHPASSWORD'{api_key_arg}"
+        )
+        interface_command = (
+            f"curl -fsSL {script_url} | sudo bash -s -- "
+            f"--url {base_url} -U root -I wg0 --name RU-1-Node --key /root/.ssh/id_ed25519{api_key_arg}"
+        )
+
+        text = (
+            "Скрипт запускается прямо на сервере, который нужно добавить. "
+            "Он сам определит имя, SSH-порт и IP, если не указать их явно.\n\n"
+            "С SSH-ключом:\n"
+            f"<pre>{html.escape(key_command)}</pre>\n"
+            "С SSH-паролем:\n"
+            f"<pre>{html.escape(password_command)}</pre>\n"
+            "С конкретным интерфейсом и названием:\n"
+            f"<pre>{html.escape(interface_command)}</pre>\n"
+            "Параметры: -U пользователь, -P порт, -I интерфейс, --name название, "
+            "--key путь_к_ключу, --pass пароль, --apikey ключ API."
+            f"{placeholder_note}"
+        )
+        await message.answer(
+            text,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [self._button("Добавить вручную", "add:start", icon="edit", user_id=user_id)],
+                    self._back_home_row("add:menu", user_id),
                 ]
             ),
         )
@@ -845,6 +974,9 @@ class BotHandlers(KeyboardMixin):
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
+
+    def _public_controller_url(self) -> str:
+        return (self.settings.webhook_url or "https://bot.example.com").rstrip("/")
 
     async def _send_node_details(self, message: Message, user_id: int, node_name: str) -> None:
         node = self.store.get(node_name)
@@ -1045,6 +1177,50 @@ class BotHandlers(KeyboardMixin):
             "\n".join(lines),
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[self._back_home_row("presets:menu")]),
         )
+
+    async def _send_api_keys_menu(self, message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else None
+        await message.answer(
+            "Раздел: API ключи",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [self._button("Создать API ключ", "api:add", icon="add", user_id=user_id)],
+                    [self._button("Список API ключей", "api:list", icon="list", user_id=user_id)],
+                    [self._button("Удалить API ключ", "api:delete", icon="delete", user_id=user_id)],
+                    self._home_row(user_id),
+                ]
+            ),
+        )
+
+    async def _send_api_keys_list(self, message: Message) -> None:
+        keys = self.store.list_api_keys()
+        if not keys:
+            await message.answer(
+                "API ключей пока нет. /addnode будет доступен без apikey.",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        lines = ["API ключи:"]
+        for key in keys:
+            lines.append(f"- {key.name}: создан {key.created_at}")
+        await message.answer(
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[self._back_home_row("api:menu")]),
+        )
+
+    async def _send_delete_api_key_items(self, message: Message, user_id: int) -> None:
+        keys = self.store.list_api_keys()
+        if not keys:
+            await message.answer("API ключей пока нет.", reply_markup=self._main_keyboard(user_id))
+            return
+
+        rows = []
+        for key in keys:
+            token = self._remember_ref(user_id, key.name)
+            rows.append([InlineKeyboardButton(text=key.name, callback_data=f"api:delete_item:{token}")])
+        rows.append(self._back_home_row("api:menu", user_id))
+        await message.answer("Выбери API ключ.", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
     async def _send_reboot_warning(
         self,
@@ -1569,6 +1745,14 @@ def register_handlers(dp: Dispatcher, handlers: BotHandlers) -> None:
 
     @dp.callback_query(F.data.startswith("preset:"))
     async def parameter_preset_callbacks(query: CallbackQuery) -> None:
+        await route_callback(query)
+
+    @dp.callback_query(F.data == "api:menu")
+    async def api_keys_menu(query: CallbackQuery) -> None:
+        await route_callback(query)
+
+    @dp.callback_query(F.data.startswith("api:"))
+    async def api_key_callbacks(query: CallbackQuery) -> None:
         await route_callback(query)
 
     @dp.callback_query()

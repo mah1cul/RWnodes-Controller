@@ -38,6 +38,7 @@ class Settings:
     webhook_port: int
     webhook_path: str
     webhook_secret_token: str | None
+    addnode_path: str
     ansible_timeout: int
     ansible_host_key_checking: bool
     default_become: bool
@@ -71,6 +72,10 @@ class Settings:
         if not webhook_path:
             raise ValueError("WEBHOOK_PATH must not be empty")
 
+        addnode_path = os.getenv("ADDNODE_PATH", "addnode").strip().strip("/")
+        if not addnode_path:
+            raise ValueError("ADDNODE_PATH must not be empty")
+
         return cls(
             bot_token=bot_token,
             admin_ids=admin_ids,
@@ -81,6 +86,7 @@ class Settings:
             webhook_port=int(os.getenv("WEBHOOK_PORT", "8080")),
             webhook_path=webhook_path,
             webhook_secret_token=os.getenv("WEBHOOK_SECRET_TOKEN", "").strip() or None,
+            addnode_path=addnode_path,
             ansible_timeout=int(os.getenv("ANSIBLE_TIMEOUT", "900")),
             ansible_host_key_checking=_parse_bool(os.getenv("ANSIBLE_HOST_KEY_CHECKING"), False),
             default_become=_parse_bool(os.getenv("DEFAULT_BECOME"), False),

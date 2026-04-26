@@ -18,6 +18,7 @@ polling or webhook mode.
 - Button-only Telegram UI for operational actions.
 - Add nodes with a step-by-step inline wizard.
 - Add, list and delete nodes.
+- Add nodes from the node itself through the `/addnode` HTTP API.
 - Upload per-node SSH private keys through the bot.
 - Use SSH password auth when adding a node.
 - Add parameter presets for node name, user, host, port and SSH key.
@@ -26,6 +27,7 @@ polling or webhook mode.
 - Reboot one node or all nodes through a confirmation screen.
 - Detect a node country from the first two letters of its name and show flags.
 - Admin-only access by Telegram numeric user id.
+- Optional API keys for `/addnode` registration.
 
 ## Quick Start
 
@@ -65,8 +67,10 @@ docker compose logs -f rwnodes-controller
 app/bot.py                  aiogram Bot/Dispatcher assembly
 app/handlers.py             message and callback handlers registered with @dp decorators
 app/keyboards.py            inline keyboard builders and emoji metadata
+app/api.py                  HTTP API for node self-registration
 app/database/store.py       SQLite store and models
 app/database/migrations/    SQL migrations applied on startup
+scripts/addnode.sh          node-side registration script
 ```
 
 ## Telegram UI
@@ -98,9 +102,17 @@ The main menu also shows a compact node summary:
 Telegram may still show its standard Start button for opening the bot. After
 that, use the inline menu.
 
-## Add Node Wizard
+## Add Node
 
-Press `Добавить ноду`. The bot asks, one step at a time:
+Press `Добавить ноду`, then choose one of two modes:
+
+```text
+Добавить вручную
+Скрипт добавления
+```
+
+`Добавить вручную` starts the usual bot wizard. The bot asks, one step at a
+time:
 
 ```text
 Название ноды
@@ -126,6 +138,62 @@ Uploaded node keys are stored in:
 ```text
 /data/ssh_keys/<node>.key
 ```
+
+`Скрипт добавления` shows ready commands for registering the current server
+through the HTTP API without downloading the script manually.
+
+## Add Node API
+
+The app exposes `POST /addnode` on the same HTTP server as webhook traffic. It is
+available in both `polling` and `webhook` modes.
+
+Accepted fields:
+
+```text
+name      node name in the bot
+host      IP/host used by Ansible
+user      SSH username
+port      SSH port
+ssh_key   private SSH key text
+password  SSH password
+apikey    optional API key, also accepted as X-Api-Key header
+```
+
+Send exactly one auth field: `ssh_key` or `password`.
+
+API keys are managed from the bot in `API ключи`. If no API keys exist,
+`/addnode` accepts requests without `apikey`. Once at least one key exists, every
+request must include a valid key.
+
+The node-side script is stored at:
+
+```text
+/app/scripts/addnode.sh
+```
+
+The same script is served over HTTP:
+
+```text
+GET /scripts/addnode
+GET /scripts/addnode.sh
+```
+
+Example with SSH key:
+
+```bash
+curl -fsSL https://hooks.example.com/scripts/addnode | sudo bash -s -- --url https://hooks.example.com -U root --key /root/.ssh/id_ed25519
+```
+
+Example with password and a specific interface:
+
+```bash
+curl -fsSL https://hooks.example.com/scripts/addnode | sudo bash -s -- --url https://hooks.example.com -U root -I wg0 --name RU-1-Node --pass 'SSHPASSWORD' --apikey 'APIKEY'
+```
+
+`--url` can be the base controller URL; the script appends `/addnode`. If you
+changed `ADDNODE_PATH`, set `RWNODES_ADDNODE_PATH` for the script. If `-P` is not
+set, it reads the SSH port from sshd config and falls back to `22`. If `-I` is
+not set, it uses a public IPv4 lookup.
 
 ## Parameter Presets
 
@@ -229,6 +297,7 @@ separate confirmation before Ansible starts the reboot playbook.
 | `WEBHOOK_PORT` | `8080` | Webhook port inside and outside the container. |
 | `WEBHOOK_PATH` | `telegram/webhook` | Webhook path appended to `WEBHOOK_URL`. |
 | `WEBHOOK_SECRET_TOKEN` | empty | Optional Telegram webhook secret token. |
+| `ADDNODE_PATH` | `addnode` | HTTP path for node self-registration API. |
 | `PREMIUM_EMOJI_MODE` | `false` | `true` uses hardcoded Telegram custom emoji ids; `false` uses Unicode icons. |
 
 ## Premium Emoji Icons
@@ -273,6 +342,7 @@ WEBHOOK_LISTEN=0.0.0.0
 WEBHOOK_PORT=8080
 WEBHOOK_PATH=webhook
 WEBHOOK_SECRET_TOKEN=change-me
+ADDNODE_PATH=addnode
 CADDY_DOCKER_NETWORK=caddy
 ```
 
@@ -281,6 +351,12 @@ the example above Telegram receives:
 
 ```text
 https://hooks.example.com/webhook
+```
+
+With `ADDNODE_PATH=addnode`, the node registration API is:
+
+```text
+https://hooks.example.com/addnode
 ```
 
 The compose file does not publish `WEBHOOK_PORT` to the host. It only exposes
@@ -298,7 +374,8 @@ that exact name. In Caddy, proxy to:
 rwnodes-controller:8080
 ```
 
-The external proxy path must match `WEBHOOK_PATH`.
+The external proxy must forward both `WEBHOOK_PATH` and `ADDNODE_PATH` to the
+controller container.
 
 ## Security Notes
 
@@ -307,4 +384,6 @@ The external proxy path must match `WEBHOOK_PATH`.
 - Private keys uploaded for nodes are stored in the Docker volume under `/data/ssh_keys`.
 - Private key presets are stored in the Docker volume under `/data/ssh_key_presets`.
 - SSH passwords are stored in the SQLite database.
+- API keys are stored as SHA-256 hashes; the raw key is shown only once when created.
+- `scripts/addnode.sh --pass` puts the SSH password in shell history/process args; prefer `--key`.
 - Do not commit `.env`, `ssh_keys` or the SQLite database.
