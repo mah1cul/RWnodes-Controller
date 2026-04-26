@@ -64,6 +64,8 @@ class Settings:
         webhook_url = os.getenv("WEBHOOK_URL", "").strip() or None
         if bot_mode == "webhook" and not webhook_url:
             raise ValueError("WEBHOOK_URL is required when BOT_MODE=webhook")
+        if webhook_url:
+            webhook_url = webhook_url.rstrip("/")
 
         webhook_path = os.getenv("WEBHOOK_PATH", "telegram/webhook").strip().strip("/")
         if not webhook_path:

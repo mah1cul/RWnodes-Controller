@@ -224,10 +224,10 @@ separate confirmation before Ansible starts the reboot playbook.
 | `ANSIBLE_HOST_KEY_CHECKING` | `false` | Enables/disables SSH host key checking. |
 | `DEFAULT_BECOME` | `false` | Enables Ansible become for every node unless overridden by node config. |
 | `MAX_TELEGRAM_OUTPUT_CHARS` | `3500` | Max output chars sent back to Telegram. |
-| `WEBHOOK_URL` | empty | Required in webhook mode. |
+| `WEBHOOK_URL` | empty | Required in webhook mode. Base public URL without path, for example `https://hooks.example.com`. |
 | `WEBHOOK_LISTEN` | `0.0.0.0` | Webhook bind address inside the container. |
 | `WEBHOOK_PORT` | `8080` | Webhook port inside and outside the container. |
-| `WEBHOOK_PATH` | `telegram/webhook` | Webhook URL path. |
+| `WEBHOOK_PATH` | `telegram/webhook` | Webhook path appended to `WEBHOOK_URL`. |
 | `WEBHOOK_SECRET_TOKEN` | empty | Optional Telegram webhook secret token. |
 | `PREMIUM_EMOJI_MODE` | `false` | `true` uses hardcoded Telegram custom emoji ids; `false` uses Unicode icons. |
 
@@ -268,12 +268,19 @@ Webhook mode requires a public HTTPS URL that forwards requests to the container
 
 ```env
 BOT_MODE=webhook
-WEBHOOK_URL=https://example.com/telegram/webhook
+WEBHOOK_URL=https://hooks.example.com
 WEBHOOK_LISTEN=0.0.0.0
 WEBHOOK_PORT=8080
-WEBHOOK_PATH=telegram/webhook
+WEBHOOK_PATH=webhook
 WEBHOOK_SECRET_TOKEN=change-me
 CADDY_DOCKER_NETWORK=caddy
+```
+
+The bot registers Telegram webhook as `WEBHOOK_URL + "/" + WEBHOOK_PATH`. With
+the example above Telegram receives:
+
+```text
+https://hooks.example.com/webhook
 ```
 
 The compose file does not publish `WEBHOOK_PORT` to the host. It only exposes
@@ -291,7 +298,7 @@ that exact name. In Caddy, proxy to:
 rwnodes-controller:8080
 ```
 
-The URL path in `WEBHOOK_URL` must match `WEBHOOK_PATH`.
+The external proxy path must match `WEBHOOK_PATH`.
 
 ## Security Notes
 

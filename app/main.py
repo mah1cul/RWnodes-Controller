@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import urljoin
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher
@@ -22,8 +23,9 @@ def configure_logging() -> None:
 
 async def run_webhook(bot: Bot, dispatcher: Dispatcher, settings: Settings) -> None:
     webhook_path = f"/{settings.webhook_path}"
+    telegram_webhook_url = urljoin(f"{settings.webhook_url.rstrip('/')}/", settings.webhook_path)
     await bot.set_webhook(
-        url=settings.webhook_url,
+        url=telegram_webhook_url,
         secret_token=settings.webhook_secret_token,
         allowed_updates=dispatcher.resolve_used_update_types(),
     )
@@ -47,6 +49,7 @@ async def run_webhook(bot: Bot, dispatcher: Dispatcher, settings: Settings) -> N
         settings.webhook_port,
         webhook_path,
     )
+    logging.info("Telegram webhook URL set to %s", telegram_webhook_url)
 
     try:
         await asyncio.Event().wait()
