@@ -97,6 +97,32 @@ COUNTRY_CODE_ALIASES = {"UK": "GB"}
 NO_COUNTRY_FLAG = "🏳️‍🌈"
 
 
+class EditableCallbackMessage:
+    def __init__(self, message: Message, from_user: Any) -> None:
+        self._message = message
+        self.from_user = from_user
+        self.chat = message.chat
+        self.prefers_edit = True
+        self._answered_once = False
+
+    async def answer(self, text: str, **kwargs: Any) -> Message:
+        if not self._answered_once:
+            self._answered_once = True
+            return await self.replace(text, **kwargs)
+        return await self._message.answer(text, **kwargs)
+
+    async def replace(self, text: str, **kwargs: Any) -> Message:
+        try:
+            return await self._message.edit_text(text, **kwargs)
+        except TelegramBadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                return self._message
+            return await self._message.answer(text, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._message, name)
+
+
 class BotController:
     def __init__(self, settings: Settings, store: NodeStore, runner: AnsibleRunner) -> None:
         self.settings = settings
@@ -169,14 +195,14 @@ class BotController:
 
         await query.answer()
         await self._ensure_premium_emoji_ready(query.message)
+        message = EditableCallbackMessage(query.message, query.from_user)
         try:
-            await self._dispatch_button(query)
+            await self._dispatch_button(query, message)
         except ValueError as exc:
-            await query.message.answer(str(exc), reply_markup=self._main_keyboard(query.from_user.id))
+            await message.answer(str(exc), reply_markup=self._main_keyboard(query.from_user.id))
 
-    async def _dispatch_button(self, query: CallbackQuery) -> None:
+    async def _dispatch_button(self, query: CallbackQuery, message: Message) -> None:
         data = query.data or ""
-        message = query.message
         user_id = query.from_user.id
 
         if data == "menu:main":
@@ -1140,6 +1166,12 @@ class BotController:
             async with self.operation_lock:
                 result = await asyncio.to_thread(action)
         except Exception as exc:  # noqa: BLE001 - Telegram needs a clear operator-facing error.
+            if getattr(message, "prefers_edit", False):
+                await message.replace(
+                    f"Ошибка: {exc}",
+                    reply_markup=self._main_keyboard(message.from_user.id if message.from_user else None),
+                )
+                return
             await message.answer(f"Ошибка: {exc}", reply_markup=self._main_keyboard())
             return
 
@@ -1150,9 +1182,20 @@ class BotController:
         header = f"{status}: {result.action} target={result.target} exit_code={result.returncode}"
         output = result.output.strip() or "(no output)"
         max_chars = max(500, self.settings.max_telegram_output_chars)
+        if getattr(message, "prefers_edit", False):
+            max_chars = min(max_chars, 3300)
         body = output[-max_chars:]
         if len(output) > max_chars:
             body = f"... output truncated to last {max_chars} chars ...\n{body}"
+
+        if getattr(message, "prefers_edit", False):
+            await message.replace(
+                f"{html.escape(header)}\n\n<pre>{html.escape(body)}</pre>",
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+                reply_markup=self._main_keyboard(message.from_user.id if message.from_user else None),
+            )
+            return
 
         await message.answer(header)
         await message.answer(
@@ -1171,6 +1214,14 @@ class BotController:
     ) -> None:
         max_chars = 3500
         chunks = [value[i : i + max_chars] for i in range(0, len(value), max_chars)] or [""]
+        if getattr(message, "prefers_edit", False) and len(chunks) == 1:
+            await message.replace(
+                f"{html.escape(title)}\n\n<pre>{html.escape(chunks[0])}</pre>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[self._back_home_row(back_callback)]),
+            )
+            return
+
         await message.answer(title)
         for index, chunk in enumerate(chunks, start=1):
             suffix = f" ({index}/{len(chunks)})" if len(chunks) > 1 else ""
