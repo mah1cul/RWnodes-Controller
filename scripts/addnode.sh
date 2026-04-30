@@ -107,7 +107,7 @@ done
 need_cmd curl
 need_cmd awk
 
-[[ -n "$API_URL" ]] || fail "--url or RWNODES_API_URL is required"
+[[ -n "$API_URL" ]] || fail "RWNODES_API_URL is required when the script is not served with an embedded controller URL"
 API_URL="$(normalize_api_url "$API_URL")"
 [[ -n "$SSH_USER" ]] || fail "-U username is required"
 

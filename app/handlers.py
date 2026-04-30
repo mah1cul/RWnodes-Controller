@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import os
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -912,6 +913,12 @@ class BotHandlers(KeyboardMixin):
         base_url = self._public_controller_url()
         script_url = f"{base_url}/scripts/addnode"
         api_key_arg = " --apikey APIKEY" if self.store.has_api_keys() else ""
+        command_prefix = (
+            f"curl -fsSL {shlex.quote(script_url)} | sudo env "
+            f"RWNODES_API_URL={shlex.quote(base_url)} "
+            f"RWNODES_ADDNODE_PATH={shlex.quote(self.settings.addnode_path)} "
+            "bash -s --"
+        )
         placeholder_note = ""
         if not self.settings.webhook_url:
             placeholder_note = (
@@ -920,21 +927,18 @@ class BotHandlers(KeyboardMixin):
             )
 
         key_command = (
-            f"curl -fsSL {script_url} | sudo bash -s -- "
-            f"-U root --key /root/.ssh/id_ed25519{api_key_arg}"
+            f"{command_prefix} -U root --key /root/.ssh/id_ed25519{api_key_arg}"
         )
         password_command = (
-            f"curl -fsSL {script_url} | sudo bash -s -- "
-            f"-U root --pass 'SSHPASSWORD'{api_key_arg}"
+            f"{command_prefix} -U root --pass 'SSHPASSWORD'{api_key_arg}"
         )
         interface_command = (
-            f"curl -fsSL {script_url} | sudo bash -s -- "
-            f"-U root -I wg0 --name RU-1-Node --key /root/.ssh/id_ed25519{api_key_arg}"
+            f"{command_prefix} -U root -I wg0 --name RU-1-Node --key /root/.ssh/id_ed25519{api_key_arg}"
         )
 
         text = (
             "Скрипт запускается прямо на сервере, который нужно добавить. "
-            "Адрес API уже встроен в скрипт, который отдает бот. "
+            "Адрес API передается через RWNODES_API_URL без флага --url. "
             "Он сам определит имя, SSH-порт и IP, если не указать их явно.\n\n"
             "С SSH-ключом:\n"
             f"<pre>{html.escape(key_command)}</pre>\n"
