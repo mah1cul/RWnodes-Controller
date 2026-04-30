@@ -43,16 +43,11 @@ cp .env.example .env
 BOT_TOKEN=123456:telegram-bot-token
 ADMIN_IDS=123456789
 BOT_MODE=polling
-PUBLIC_BASE_URL=https://hooks.example.com
 ```
 
 `ADMIN_IDS` must contain your numeric Telegram user id. If you do not know it,
 open the bot and send any message: unauthorized users receive a reply with their
 id.
-
-`PUBLIC_BASE_URL` is the public controller URL used in bot instructions and
-embedded into `/scripts/addnode`. Use the base URL only, without `/addnode` or
-`/webhook`.
 
 3. Build and run:
 
@@ -186,20 +181,19 @@ GET /scripts/addnode.sh
 Example with SSH key:
 
 ```bash
-curl -fsSL https://hooks.example.com/scripts/addnode | sudo bash -s -- -U root --key /root/.ssh/id_ed25519
+curl -fsSL https://hooks.example.com/scripts/addnode | sudo bash -s -- --url https://hooks.example.com -U root --key /root/.ssh/id_ed25519
 ```
 
 Example with password and a specific interface:
 
 ```bash
-curl -fsSL https://hooks.example.com/scripts/addnode | sudo bash -s -- -U root -I wg0 --name RU-1-Node --pass 'SSHPASSWORD' --apikey 'APIKEY'
+curl -fsSL https://hooks.example.com/scripts/addnode | sudo bash -s -- --url https://hooks.example.com -U root -I wg0 --name RU-1-Node --pass 'SSHPASSWORD' --apikey 'APIKEY'
 ```
 
-When the script is served from `/scripts/addnode`, the app embeds
-`PUBLIC_BASE_URL` and `ADDNODE_PATH` into the response. If you run the repository
-copy of `scripts/addnode.sh` directly, pass `--url` or set `RWNODES_API_URL`.
-If `-P` is not set, it reads the SSH port from sshd config and falls back to
-`22`. If `-I` is not set, it uses a public IPv4 lookup.
+`--url` is the base controller URL; the script appends `/addnode`. If you changed
+`ADDNODE_PATH`, set `RWNODES_ADDNODE_PATH` for the script. If `-P` is not set, it
+reads the SSH port from sshd config and falls back to `22`. If `-I` is not set,
+it uses a public IPv4 lookup.
 
 ## Parameter Presets
 

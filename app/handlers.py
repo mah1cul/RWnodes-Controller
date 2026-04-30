@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import html
 import os
-import shlex
 from pathlib import Path
 from typing import Any
 
@@ -913,12 +912,12 @@ class BotHandlers(KeyboardMixin):
         base_url = self._public_controller_url()
         script_url = f"{base_url}/scripts/addnode"
         api_key_arg = " --apikey APIKEY" if self.store.has_api_keys() else ""
-        command_prefix = f"curl -fsSL {shlex.quote(script_url)} | sudo bash -s --"
+        command_prefix = f"curl -fsSL {script_url} | sudo bash -s -- --url {base_url}"
         placeholder_note = ""
-        if not self.settings.public_base_url and not self.settings.webhook_url:
+        if not self.settings.webhook_url:
             placeholder_note = (
-                "\n\nPUBLIC_BASE_URL не задан, поэтому в примерах стоит домен-заглушка. "
-                "Укажи публичный адрес контроллера в env."
+                "\n\nWEBHOOK_URL не задан, поэтому в примерах стоит домен-заглушка. "
+                "Замени его на публичный адрес контроллера."
             )
 
         key_command = (
@@ -933,7 +932,7 @@ class BotHandlers(KeyboardMixin):
 
         text = (
             "Скрипт запускается прямо на сервере, который нужно добавить. "
-            "Адрес API зашивается в скрипт, который отдает бот, поэтому флаг --url не нужен. "
+            "Адрес API передается явно через --url. "
             "Он сам определит имя, SSH-порт и IP, если не указать их явно.\n\n"
             "С SSH-ключом:\n"
             f"<pre>{html.escape(key_command)}</pre>\n"
@@ -991,7 +990,7 @@ class BotHandlers(KeyboardMixin):
         )
 
     def _public_controller_url(self) -> str:
-        return (self.settings.public_base_url or self.settings.webhook_url or "https://bot.example.com").rstrip("/")
+        return (self.settings.webhook_url or "https://bot.example.com").rstrip("/")
 
     def _back_keyboard(self, back_callback: str, user_id: int | None = None) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(inline_keyboard=[self._back_home_row(back_callback, user_id)])

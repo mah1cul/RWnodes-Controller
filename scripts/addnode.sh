@@ -1,17 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEFAULT_API_URL="__RWNODES_DEFAULT_API_URL__"
-DEFAULT_ADDNODE_PATH="__RWNODES_DEFAULT_ADDNODE_PATH__"
-if [[ "$DEFAULT_API_URL" == "__RWNODES_DEFAULT_API_URL__" ]]; then
-  DEFAULT_API_URL=""
-fi
-if [[ "$DEFAULT_ADDNODE_PATH" == "__RWNODES_DEFAULT_ADDNODE_PATH__" ]]; then
-  DEFAULT_ADDNODE_PATH="addnode"
-fi
-
-API_URL="${RWNODES_API_URL:-$DEFAULT_API_URL}"
-ADDNODE_PATH="${RWNODES_ADDNODE_PATH:-$DEFAULT_ADDNODE_PATH}"
+API_URL="${RWNODES_API_URL:-}"
+ADDNODE_PATH="${RWNODES_ADDNODE_PATH:-addnode}"
 SSH_PORT=""
 SSH_USER=""
 NODE_NAME=""
@@ -23,11 +14,10 @@ API_KEY=""
 usage() {
   cat <<'EOF'
 Usage:
-  addnode.sh -U USER [options] (--key /path/to/key | --pass PASSWORD)
+  addnode.sh --url https://hooks.example.com -U USER [options] (--key /path/to/key | --pass PASSWORD)
 
 Options:
   --url URL          Base controller URL. Can also be set with RWNODES_API_URL.
-                    Not needed when the script is loaded from /scripts/addnode.
                     The script appends /addnode unless URL already ends with it.
   -P sshport        SSH port. If empty, reads sshd config, fallback 22.
   -U username       SSH username. Required.
@@ -107,9 +97,7 @@ done
 need_cmd curl
 need_cmd awk
 
-if [[ -z "$API_URL" ]]; then
-  fail "RWNODES_API_URL is required. Regenerate the command in the bot or run: curl -fsSL https://YOUR_DOMAIN/scripts/addnode | sudo env RWNODES_API_URL=https://YOUR_DOMAIN RWNODES_ADDNODE_PATH=$ADDNODE_PATH bash -s -- -U USER (--key /path/to/key | --pass PASSWORD)"
-fi
+[[ -n "$API_URL" ]] || fail "--url or RWNODES_API_URL is required"
 API_URL="$(normalize_api_url "$API_URL")"
 [[ -n "$SSH_USER" ]] || fail "-U username is required"
 
