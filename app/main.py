@@ -31,7 +31,7 @@ def create_http_app(
     include_telegram_webhook: bool,
 ) -> web.Application:
     app = web.Application()
-    AddNodeApi(settings=settings, store=store).register(app)
+    AddNodeApi(settings=settings, store=store, bot=bot).register(app)
 
     if include_telegram_webhook:
         webhook_path = f"/{settings.webhook_path}"

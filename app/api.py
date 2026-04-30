@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import html
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 from aiohttp import web
+from aiogram import Bot
+from aiogram.enums import ParseMode
 
 from app.config import Settings
 from app.database.store import Node, NodeStore
@@ -13,12 +17,14 @@ from app.keyboards import COUNTRY_CODE_ALIASES, ISO_COUNTRY_CODES
 
 MAX_PRIVATE_KEY_BYTES = 128 * 1024
 ADDNODE_SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "addnode.sh"
+LOGGER = logging.getLogger(__name__)
 
 
 class AddNodeApi:
-    def __init__(self, settings: Settings, store: NodeStore) -> None:
+    def __init__(self, settings: Settings, store: NodeStore, bot: Bot) -> None:
         self.settings = settings
         self.store = store
+        self.bot = bot
 
     def register(self, app: web.Application) -> None:
         app.router.add_post(f"/{self.settings.addnode_path}", self.add_node)
@@ -66,6 +72,7 @@ class AddNodeApi:
                 status=400,
             )
 
+        await self._notify_admins_node_registered(node, created=existing is None, request=request)
         return web.json_response(
             {
                 "ok": True,
@@ -79,6 +86,30 @@ class AddNodeApi:
                 },
             }
         )
+
+    async def _notify_admins_node_registered(self, node: Node, *, created: bool, request: web.Request) -> None:
+        action = "добавлена" if created else "обновлена"
+        source_ip = self._request_source_ip(request)
+        country = node.country_code or "не задана"
+        text = (
+            f"Нода {action} в бота\n\n"
+            f"Название: <b>{html.escape(node.name)}</b>\n"
+            f"SSH: <code>{html.escape(node.user)}@{html.escape(node.host)}:{node.port}</code>\n"
+            f"Auth: {html.escape(node.auth_summary)}\n"
+            f"Страна: {html.escape(country)}\n"
+            f"Источник: <code>{html.escape(source_ip)}</code>"
+        )
+
+        for admin_id in self.settings.admin_ids:
+            try:
+                await self.bot.send_message(admin_id, text, parse_mode=ParseMode.HTML)
+            except Exception as exc:  # noqa: BLE001 - notification must not break API registration.
+                LOGGER.warning("Failed to notify admin %s about addnode registration: %s", admin_id, exc)
+
+    @staticmethod
+    def _request_source_ip(request: web.Request) -> str:
+        forwarded_for = request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
+        return forwarded_for or request.remote or "unknown"
 
     async def _read_payload(self, request: web.Request) -> dict[str, Any]:
         if request.content_type == "application/json":
