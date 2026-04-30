@@ -186,6 +186,7 @@ curl_args=(
 
 if [[ -n "$API_KEY" ]]; then
   curl_args+=(--header "X-Api-Key: $API_KEY")
+  curl_args+=(--form-string "apikey=$API_KEY")
 fi
 if [[ -n "$KEY_PATH" ]]; then
   curl_args+=(--form "ssh_key=<$KEY_PATH")
@@ -193,11 +194,21 @@ else
   curl_args+=(--form-string "password=$SSH_PASSWORD")
 fi
 
-response="$(curl "${curl_args[@]}" -w $'\n%{http_code}')"
+echo "registering node '$NODE_NAME' as $SSH_USER@$NODE_HOST:$SSH_PORT via $API_URL" >&2
+if ! response="$(curl "${curl_args[@]}" -w $'\n%{http_code}')"; then
+  fail "request to $API_URL failed"
+fi
 http_code="${response##*$'\n'}"
 body="${response%$'\n'*}"
 
-echo "$body"
 if [[ ! "$http_code" =~ ^2 ]]; then
-  exit 1
+  [[ -n "$body" ]] && echo "$body" >&2
+  fail "controller returned HTTP $http_code"
 fi
+
+if [[ "$body" != *'"ok": true'* && "$body" != *'"ok":true'* ]]; then
+  [[ -n "$body" ]] && echo "$body" >&2
+  fail "controller did not confirm node creation"
+fi
+
+echo "$body"
