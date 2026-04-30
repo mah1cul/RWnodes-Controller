@@ -913,17 +913,12 @@ class BotHandlers(KeyboardMixin):
         base_url = self._public_controller_url()
         script_url = f"{base_url}/scripts/addnode"
         api_key_arg = " --apikey APIKEY" if self.store.has_api_keys() else ""
-        command_prefix = (
-            f"curl -fsSL {shlex.quote(script_url)} | sudo env "
-            f"RWNODES_API_URL={shlex.quote(base_url)} "
-            f"RWNODES_ADDNODE_PATH={shlex.quote(self.settings.addnode_path)} "
-            "bash -s --"
-        )
+        command_prefix = f"curl -fsSL {shlex.quote(script_url)} | sudo bash -s --"
         placeholder_note = ""
-        if not self.settings.webhook_url:
+        if not self.settings.public_base_url and not self.settings.webhook_url:
             placeholder_note = (
-                "\n\nWEBHOOK_URL не задан, поэтому в примерах стоит домен-заглушка. "
-                "Замени его на публичный адрес, который видит добавляемая нода."
+                "\n\nPUBLIC_BASE_URL не задан, поэтому в примерах стоит домен-заглушка. "
+                "Укажи публичный адрес контроллера в env."
             )
 
         key_command = (
@@ -938,8 +933,7 @@ class BotHandlers(KeyboardMixin):
 
         text = (
             "Скрипт запускается прямо на сервере, который нужно добавить. "
-            "Адрес API передается через sudo env RWNODES_API_URL без флага --url. "
-            "Если видишь ошибку про RWNODES_API_URL, значит была использована старая команда. "
+            "Адрес API зашивается в скрипт, который отдает бот, поэтому флаг --url не нужен. "
             "Он сам определит имя, SSH-порт и IP, если не указать их явно.\n\n"
             "С SSH-ключом:\n"
             f"<pre>{html.escape(key_command)}</pre>\n"
@@ -997,7 +991,7 @@ class BotHandlers(KeyboardMixin):
         )
 
     def _public_controller_url(self) -> str:
-        return (self.settings.webhook_url or "https://bot.example.com").rstrip("/")
+        return (self.settings.public_base_url or self.settings.webhook_url or "https://bot.example.com").rstrip("/")
 
     def _back_keyboard(self, back_callback: str, user_id: int | None = None) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(inline_keyboard=[self._back_home_row(back_callback, user_id)])

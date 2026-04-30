@@ -33,6 +33,7 @@ class Settings:
     admin_ids: frozenset[int]
     db_path: Path
     bot_mode: str
+    public_base_url: str | None
     webhook_url: str | None
     webhook_listen: str
     webhook_port: int
@@ -68,6 +69,10 @@ class Settings:
         if webhook_url:
             webhook_url = webhook_url.rstrip("/")
 
+        public_base_url = os.getenv("PUBLIC_BASE_URL", "").strip() or webhook_url
+        if public_base_url:
+            public_base_url = public_base_url.rstrip("/")
+
         webhook_path = os.getenv("WEBHOOK_PATH", "telegram/webhook").strip().strip("/")
         if not webhook_path:
             raise ValueError("WEBHOOK_PATH must not be empty")
@@ -81,6 +86,7 @@ class Settings:
             admin_ids=admin_ids,
             db_path=Path(os.getenv("DB_PATH", "/data/rwnodes.sqlite3")),
             bot_mode=bot_mode,
+            public_base_url=public_base_url,
             webhook_url=webhook_url,
             webhook_listen=os.getenv("WEBHOOK_LISTEN", "0.0.0.0"),
             webhook_port=int(os.getenv("WEBHOOK_PORT", "8080")),

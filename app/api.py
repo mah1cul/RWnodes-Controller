@@ -34,7 +34,7 @@ class AddNodeApi:
                 status=404,
             )
 
-        base_url = self.settings.webhook_url or self._request_base_url(request)
+        base_url = self.settings.public_base_url or self.settings.webhook_url or self._request_base_url(request)
         script = script.replace(
             "__RWNODES_DEFAULT_API_URL__",
             self._escape_bash_double_quoted(base_url.rstrip("/")),
