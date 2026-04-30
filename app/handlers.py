@@ -382,7 +382,7 @@ class BotHandlers(KeyboardMixin):
             auth = "без авторизации"
         await message.answer(
             f"Нода сохранена: {node.name} {node.user}@{node.host}:{node.port}, {auth}",
-            reply_markup=self._main_keyboard(),
+            reply_markup=self._back_keyboard("nodes:menu", user_id),
         )
 
     async def _handle_node_button(self, message: Message, user_id: int, data: str) -> None:
@@ -394,7 +394,7 @@ class BotHandlers(KeyboardMixin):
             await self._send_node_details(message, user_id, node_name)
         elif action in {"update", "ping"}:
             node_name = self._get_ref(user_id, parts[2])
-            await self._run_node_action(message, action, node_name)
+            await self._run_node_action(message, action, node_name, back_callback=f"node:open:{parts[2]}")
         elif action == "reboot":
             node_name = self._get_ref(user_id, parts[2])
             await self._send_reboot_warning(message, user_id, node_name, back_callback=f"node:open:{parts[2]}")
@@ -417,9 +417,9 @@ class BotHandlers(KeyboardMixin):
             if deleted:
                 if node:
                     self._delete_managed_key(node)
-                await message.answer(f"Нода {node_name} удалена.", reply_markup=self._main_keyboard())
+                await message.answer(f"Нода {node_name} удалена.", reply_markup=self._back_keyboard("nodes:list", user_id))
             else:
-                await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+                await message.answer("Нода не найдена.", reply_markup=self._back_keyboard("nodes:list", user_id))
         elif action == "setkey":
             node_name = self._get_ref(user_id, parts[2])
             self._session(user_id)["flow"] = {"type": "set_key", "data": {"node": node_name}}
@@ -437,7 +437,7 @@ class BotHandlers(KeyboardMixin):
             node_name = self._get_ref(user_id, parts[2])
             node = self.store.get(node_name)
             if not node:
-                await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+                await message.answer("Нода не найдена.", reply_markup=self._back_keyboard("nodes:list", user_id))
                 return
 
             self._delete_managed_key(node)
@@ -456,7 +456,7 @@ class BotHandlers(KeyboardMixin):
             )
             await message.answer(
                 f"SSH-ключ отвязан от ноды {node.name}.",
-                reply_markup=self._main_keyboard(),
+                reply_markup=self._back_keyboard(f"node:open:{parts[2]}", user_id),
             )
 
     async def _handle_edit_button(self, message: Message, user_id: int, data: str) -> None:
@@ -468,7 +468,7 @@ class BotHandlers(KeyboardMixin):
             node_name = self._get_ref(user_id, parts[3])
             node = self.store.get(node_name)
             if not node:
-                await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+                await message.answer("Нода не найдена.", reply_markup=self._back_keyboard("nodes:list", user_id))
                 return
 
             self._session(user_id)["flow"] = {
@@ -510,12 +510,15 @@ class BotHandlers(KeyboardMixin):
         node_name = self._get_ref(user_id, parts[2])
         node = self.store.get(node_name)
         if not node:
-            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            await message.answer("Нода не найдена.", reply_markup=self._back_keyboard("nodes:list", user_id))
             return
 
         if action == "password":
             if not node.password:
-                await message.answer("У этой ноды нет сохраненного пароля.", reply_markup=self._main_keyboard())
+                await message.answer(
+                    "У этой ноды нет сохраненного пароля.",
+                    reply_markup=self._back_keyboard(f"node:secret:{parts[2]}", user_id),
+                )
                 return
             await self._send_secret_text(
                 message,
@@ -525,12 +528,18 @@ class BotHandlers(KeyboardMixin):
             )
         elif action == "key":
             if not node.ssh_key_path:
-                await message.answer("У этой ноды нет сохраненного SSH-ключа.", reply_markup=self._main_keyboard())
+                await message.answer(
+                    "У этой ноды нет сохраненного SSH-ключа.",
+                    reply_markup=self._back_keyboard(f"node:secret:{parts[2]}", user_id),
+                )
                 return
             try:
                 key_text = Path(node.ssh_key_path).read_text(encoding="utf-8")
             except OSError as exc:
-                await message.answer(f"Не удалось прочитать ключ: {exc}", reply_markup=self._main_keyboard())
+                await message.answer(
+                    f"Не удалось прочитать ключ: {exc}",
+                    reply_markup=self._back_keyboard(f"node:secret:{parts[2]}", user_id),
+                )
                 return
             await self._send_secret_text(
                 message,
@@ -558,14 +567,14 @@ class BotHandlers(KeyboardMixin):
         if action == "reboot":
             await self._send_reboot_warning(message, user_id, target, back_callback="ops:menu")
             return
-        await self._run_node_action(message, action, target)
+        await self._run_node_action(message, action, target, back_callback="ops:menu")
 
     async def _handle_set_key_message(self, message: Message, flow: dict[str, Any]) -> None:
         node_name = flow.get("data", {}).get("node")
         node = self.store.get(node_name)
         if not node:
             self._clear_flow(message.from_user.id)
-            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            await message.answer("Нода не найдена.", reply_markup=self._back_keyboard("nodes:list", message.from_user.id))
             return
 
         key_path = self._managed_key_path(node.name)
@@ -598,7 +607,7 @@ class BotHandlers(KeyboardMixin):
         self._clear_flow(message.from_user.id)
         await message.answer(
             f"SSH-ключ сохранен и привязан к ноде {node.name}.",
-            reply_markup=self._main_keyboard(),
+            reply_markup=self._back_keyboard(f"node:open:{self._remember_ref(message.from_user.id, node.name)}", message.from_user.id),
         )
 
     async def _handle_edit_node_message(self, message: Message, flow: dict[str, Any]) -> None:
@@ -608,7 +617,7 @@ class BotHandlers(KeyboardMixin):
         node = self.store.get(node_name)
         if not node:
             self._clear_flow(message.from_user.id)
-            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            await message.answer("Нода не найдена.", reply_markup=self._back_keyboard("nodes:list", message.from_user.id))
             return
 
         try:
@@ -627,7 +636,10 @@ class BotHandlers(KeyboardMixin):
         self._clear_flow(message.from_user.id)
         await message.answer(
             f"Нода обновлена: {updated_node.name} {updated_node.user}@{updated_node.host}:{updated_node.port}",
-            reply_markup=self._main_keyboard(),
+            reply_markup=self._back_keyboard(
+                f"node:open:{self._remember_ref(message.from_user.id, updated_node.name)}",
+                message.from_user.id,
+            ),
         )
 
     async def _handle_edit_password_message(self, message: Message, flow: dict[str, Any]) -> None:
@@ -635,7 +647,7 @@ class BotHandlers(KeyboardMixin):
         node = self.store.get(node_name)
         if not node:
             self._clear_flow(message.from_user.id)
-            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            await message.answer("Нода не найдена.", reply_markup=self._back_keyboard("nodes:list", message.from_user.id))
             return
 
         password = (message.text or "").strip()
@@ -660,7 +672,7 @@ class BotHandlers(KeyboardMixin):
         self._clear_flow(message.from_user.id)
         await message.answer(
             f"Пароль для {node.name} обновлен.",
-            reply_markup=self._main_keyboard(),
+            reply_markup=self._back_keyboard(f"node:open:{self._remember_ref(message.from_user.id, node.name)}", message.from_user.id),
         )
 
     async def _handle_preset_button(self, message: Message, user_id: int, data: str) -> None:
@@ -703,13 +715,13 @@ class BotHandlers(KeyboardMixin):
             field, preset_name = self._get_ref(user_id, parts[2])
             preset = self.store.delete_preset(field, preset_name)
             if not preset:
-                await message.answer("Пресет параметров не найден.", reply_markup=self._main_keyboard())
+                await message.answer("Пресет параметров не найден.", reply_markup=self._back_keyboard("presets:menu", user_id))
                 return
             if preset.field == "ssh_key":
                 self._delete_key_preset_file(Path(preset.value))
             await message.answer(
                 f"Пресет параметров удален: {preset.field}/{preset.name}",
-                reply_markup=self._main_keyboard(),
+                reply_markup=self._back_keyboard("presets:menu", user_id),
             )
 
     async def _handle_text_preset_message(self, message: Message, flow: dict[str, Any]) -> None:
@@ -741,7 +753,7 @@ class BotHandlers(KeyboardMixin):
             self._clear_flow(message.from_user.id)
             await message.answer(
                 f"Пресет параметров сохранен: {field}/{data['name']}",
-                reply_markup=self._main_keyboard(),
+                reply_markup=self._back_keyboard("presets:menu", message.from_user.id),
             )
 
     async def _handle_key_preset_message(self, message: Message, flow: dict[str, Any]) -> None:
@@ -786,7 +798,10 @@ class BotHandlers(KeyboardMixin):
             return
 
         self._clear_flow(message.from_user.id)
-        await message.answer(f"Пресет SSH-ключа сохранен: {data['name']}", reply_markup=self._main_keyboard())
+        await message.answer(
+            f"Пресет SSH-ключа сохранен: {data['name']}",
+            reply_markup=self._back_keyboard("presets:menu", message.from_user.id),
+        )
 
     async def _handle_api_key_button(self, message: Message, user_id: int, data: str) -> None:
         parts = data.split(":")
@@ -815,9 +830,9 @@ class BotHandlers(KeyboardMixin):
             key_name = self._get_ref(user_id, parts[2])
             deleted = self.store.delete_api_key(key_name)
             if deleted:
-                await message.answer(f"API ключ удален: {key_name}", reply_markup=self._main_keyboard(user_id))
+                await message.answer(f"API ключ удален: {key_name}", reply_markup=self._back_keyboard("api:menu", user_id))
             else:
-                await message.answer("API ключ не найден.", reply_markup=self._main_keyboard(user_id))
+                await message.answer("API ключ не найден.", reply_markup=self._back_keyboard("api:menu", user_id))
 
     async def _handle_api_key_message(self, message: Message, flow: dict[str, Any]) -> None:
         name = (message.text or "").strip()
@@ -839,7 +854,7 @@ class BotHandlers(KeyboardMixin):
                 f"<pre>{html.escape(raw_key)}</pre>"
             ),
             parse_mode=ParseMode.HTML,
-            reply_markup=self._main_keyboard(message.from_user.id),
+            reply_markup=self._back_keyboard("api:menu", message.from_user.id),
         )
 
     async def _send_main_menu(self, message: Message, text: str = "Главное меню") -> None:
@@ -906,19 +921,20 @@ class BotHandlers(KeyboardMixin):
 
         key_command = (
             f"curl -fsSL {script_url} | sudo bash -s -- "
-            f"--url {base_url} -U root --key /root/.ssh/id_ed25519{api_key_arg}"
+            f"-U root --key /root/.ssh/id_ed25519{api_key_arg}"
         )
         password_command = (
             f"curl -fsSL {script_url} | sudo bash -s -- "
-            f"--url {base_url} -U root --pass 'SSHPASSWORD'{api_key_arg}"
+            f"-U root --pass 'SSHPASSWORD'{api_key_arg}"
         )
         interface_command = (
             f"curl -fsSL {script_url} | sudo bash -s -- "
-            f"--url {base_url} -U root -I wg0 --name RU-1-Node --key /root/.ssh/id_ed25519{api_key_arg}"
+            f"-U root -I wg0 --name RU-1-Node --key /root/.ssh/id_ed25519{api_key_arg}"
         )
 
         text = (
             "Скрипт запускается прямо на сервере, который нужно добавить. "
+            "Адрес API уже встроен в скрипт, который отдает бот. "
             "Он сам определит имя, SSH-порт и IP, если не указать их явно.\n\n"
             "С SSH-ключом:\n"
             f"<pre>{html.escape(key_command)}</pre>\n"
@@ -945,7 +961,7 @@ class BotHandlers(KeyboardMixin):
     async def _send_nodes_menu(self, message: Message, user_id: int) -> None:
         nodes = self.store.list()
         if not nodes:
-            await message.answer("Ноды пока не добавлены.", reply_markup=self._main_keyboard())
+            await message.answer("Ноды пока не добавлены.", reply_markup=self._back_keyboard("nodes:menu", user_id))
             return
 
         lines = ["Ноды:"]
@@ -978,10 +994,13 @@ class BotHandlers(KeyboardMixin):
     def _public_controller_url(self) -> str:
         return (self.settings.webhook_url or "https://bot.example.com").rstrip("/")
 
+    def _back_keyboard(self, back_callback: str, user_id: int | None = None) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[self._back_home_row(back_callback, user_id)])
+
     async def _send_node_details(self, message: Message, user_id: int, node_name: str) -> None:
         node = self.store.get(node_name)
         if not node:
-            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            await message.answer("Нода не найдена.", reply_markup=self._back_keyboard("nodes:list", user_id))
             return
 
         token = self._remember_ref(user_id, node.name)
@@ -1017,7 +1036,7 @@ class BotHandlers(KeyboardMixin):
     async def _send_edit_node_menu(self, message: Message, user_id: int, node_name: str) -> None:
         node = self.store.get(node_name)
         if not node:
-            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            await message.answer("Нода не найдена.", reply_markup=self._back_keyboard("nodes:list", user_id))
             return
 
         token = self._remember_ref(user_id, node.name)
@@ -1043,7 +1062,7 @@ class BotHandlers(KeyboardMixin):
     async def _send_edit_auth_menu(self, message: Message, user_id: int, node_name: str) -> None:
         node = self.store.get(node_name)
         if not node:
-            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            await message.answer("Нода не найдена.", reply_markup=self._back_keyboard("nodes:list", user_id))
             return
 
         token = self._remember_ref(user_id, node.name)
@@ -1061,7 +1080,7 @@ class BotHandlers(KeyboardMixin):
     async def _send_secret_menu(self, message: Message, user_id: int, node_name: str) -> None:
         node = self.store.get(node_name)
         if not node:
-            await message.answer("Нода не найдена.", reply_markup=self._main_keyboard())
+            await message.answer("Нода не найдена.", reply_markup=self._back_keyboard("nodes:list", user_id))
             return
 
         token = self._remember_ref(user_id, node.name)
@@ -1096,7 +1115,7 @@ class BotHandlers(KeyboardMixin):
     async def _send_target_menu(self, message: Message, user_id: int, action: str) -> None:
         nodes = self.store.list()
         if not nodes:
-            await message.answer("Ноды пока не добавлены.", reply_markup=self._main_keyboard())
+            await message.answer("Ноды пока не добавлены.", reply_markup=self._back_keyboard("ops:menu", user_id))
             return
 
         prefix = f"op:target:{action}"
@@ -1153,7 +1172,10 @@ class BotHandlers(KeyboardMixin):
     async def _send_delete_preset_items(self, message: Message, user_id: int, field: str) -> None:
         presets = self.store.list_presets(field)
         if not presets:
-            await message.answer("Для этого поля пресетов параметров нет.", reply_markup=self._main_keyboard())
+            await message.answer(
+                "Для этого поля пресетов параметров нет.",
+                reply_markup=self._back_keyboard("presets:menu", user_id),
+            )
             return
 
         rows = []
@@ -1166,7 +1188,11 @@ class BotHandlers(KeyboardMixin):
     async def _send_presets_list(self, message: Message) -> None:
         presets = self.store.list_presets()
         if not presets:
-            await message.answer("Пресетов параметров пока нет.", reply_markup=self._main_keyboard())
+            user_id = message.from_user.id if message.from_user else None
+            await message.answer(
+                "Пресетов параметров пока нет.",
+                reply_markup=self._back_keyboard("presets:menu", user_id),
+            )
             return
 
         lines = ["Пресеты параметров:"]
@@ -1195,9 +1221,10 @@ class BotHandlers(KeyboardMixin):
     async def _send_api_keys_list(self, message: Message) -> None:
         keys = self.store.list_api_keys()
         if not keys:
+            user_id = message.from_user.id if message.from_user else None
             await message.answer(
                 "API ключей пока нет. /addnode будет доступен без apikey.",
-                reply_markup=self._main_keyboard(),
+                reply_markup=self._back_keyboard("api:menu", user_id),
             )
             return
 
@@ -1212,7 +1239,7 @@ class BotHandlers(KeyboardMixin):
     async def _send_delete_api_key_items(self, message: Message, user_id: int) -> None:
         keys = self.store.list_api_keys()
         if not keys:
-            await message.answer("API ключей пока нет.", reply_markup=self._main_keyboard(user_id))
+            await message.answer("API ключей пока нет.", reply_markup=self._back_keyboard("api:menu", user_id))
             return
 
         rows = []
@@ -1245,30 +1272,40 @@ class BotHandlers(KeyboardMixin):
             ),
         )
 
-    async def _run_node_action(self, message: Message, action: str, target: str) -> None:
+    async def _run_node_action(
+        self,
+        message: Message,
+        action: str,
+        target: str,
+        back_callback: str = "ops:menu",
+    ) -> None:
         if action == "update":
             await self._run_ansible_action(
                 message,
                 label=f"Обновляю RemnaNode на {target}",
                 action=lambda: self.runner.update_remnanode(target),
+                back_callback=back_callback,
             )
         elif action == "ping":
             await self._run_ansible_action(
                 message,
                 label=f"Проверяю доступ к {target}",
                 action=lambda: self.runner.ping(target),
+                back_callback=back_callback,
             )
         elif action == "reboot":
             await self._run_ansible_action(
                 message,
                 label=f"Перезагружаю {target}",
                 action=lambda: self.runner.reboot(target),
+                back_callback=back_callback,
             )
 
-    async def _run_ansible_action(self, message: Message, label: str, action) -> None:
+    async def _run_ansible_action(self, message: Message, label: str, action, back_callback: str) -> None:
         await self._bot().send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
         await message.answer(label)
 
+        user_id = message.from_user.id if message.from_user else None
         try:
             async with self.operation_lock:
                 result = await asyncio.to_thread(action)
@@ -1276,15 +1313,15 @@ class BotHandlers(KeyboardMixin):
             if getattr(message, "prefers_edit", False):
                 await message.replace(
                     f"Ошибка: {exc}",
-                    reply_markup=self._main_keyboard(message.from_user.id if message.from_user else None),
+                    reply_markup=self._back_keyboard(back_callback, user_id),
                 )
                 return
-            await message.answer(f"Ошибка: {exc}", reply_markup=self._main_keyboard())
+            await message.answer(f"Ошибка: {exc}", reply_markup=self._back_keyboard(back_callback, user_id))
             return
 
-        await self._send_ansible_result(message, result)
+        await self._send_ansible_result(message, result, back_callback)
 
-    async def _send_ansible_result(self, message: Message, result: AnsibleResult) -> None:
+    async def _send_ansible_result(self, message: Message, result: AnsibleResult, back_callback: str) -> None:
         status = "OK" if result.ok else "FAILED"
         header = f"{status}: {result.action} target={result.target} exit_code={result.returncode}"
         output = result.output.strip() or "(no output)"
@@ -1300,7 +1337,7 @@ class BotHandlers(KeyboardMixin):
                 f"{html.escape(header)}\n\n<pre>{html.escape(body)}</pre>",
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
-                reply_markup=self._main_keyboard(message.from_user.id if message.from_user else None),
+                reply_markup=self._back_keyboard(back_callback, message.from_user.id if message.from_user else None),
             )
             return
 
@@ -1309,7 +1346,7 @@ class BotHandlers(KeyboardMixin):
             f"<pre>{html.escape(body)}</pre>",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
-            reply_markup=self._main_keyboard(),
+            reply_markup=self._back_keyboard(back_callback, message.from_user.id if message.from_user else None),
         )
 
     async def _send_secret_text(

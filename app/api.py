@@ -25,7 +25,7 @@ class AddNodeApi:
         app.router.add_get("/scripts/addnode", self.addnode_script)
         app.router.add_get("/scripts/addnode.sh", self.addnode_script)
 
-    async def addnode_script(self, _request: web.Request) -> web.Response:
+    async def addnode_script(self, request: web.Request) -> web.Response:
         try:
             script = ADDNODE_SCRIPT_PATH.read_text(encoding="utf-8")
         except OSError:
@@ -34,11 +34,35 @@ class AddNodeApi:
                 status=404,
             )
 
+        base_url = self.settings.webhook_url or self._request_base_url(request)
+        script = script.replace(
+            "__RWNODES_DEFAULT_API_URL__",
+            self._escape_bash_double_quoted(base_url.rstrip("/")),
+        )
+        script = script.replace(
+            "__RWNODES_DEFAULT_ADDNODE_PATH__",
+            self._escape_bash_double_quoted(self.settings.addnode_path),
+        )
         return web.Response(
             text=script,
             content_type="text/x-shellscript",
             charset="utf-8",
             headers={"Cache-Control": "no-store"},
+        )
+
+    @staticmethod
+    def _request_base_url(request: web.Request) -> str:
+        proto = request.headers.get("X-Forwarded-Proto", request.scheme).split(",", 1)[0].strip()
+        host = request.headers.get("X-Forwarded-Host", request.host).split(",", 1)[0].strip()
+        return f"{proto}://{host}"
+
+    @staticmethod
+    def _escape_bash_double_quoted(value: str) -> str:
+        return (
+            value.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("$", "\\$")
+            .replace("`", "\\`")
         )
 
     async def add_node(self, request: web.Request) -> web.Response:

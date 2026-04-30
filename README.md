@@ -181,19 +181,20 @@ GET /scripts/addnode.sh
 Example with SSH key:
 
 ```bash
-curl -fsSL https://hooks.example.com/scripts/addnode | sudo bash -s -- --url https://hooks.example.com -U root --key /root/.ssh/id_ed25519
+curl -fsSL https://hooks.example.com/scripts/addnode | sudo bash -s -- -U root --key /root/.ssh/id_ed25519
 ```
 
 Example with password and a specific interface:
 
 ```bash
-curl -fsSL https://hooks.example.com/scripts/addnode | sudo bash -s -- --url https://hooks.example.com -U root -I wg0 --name RU-1-Node --pass 'SSHPASSWORD' --apikey 'APIKEY'
+curl -fsSL https://hooks.example.com/scripts/addnode | sudo bash -s -- -U root -I wg0 --name RU-1-Node --pass 'SSHPASSWORD' --apikey 'APIKEY'
 ```
 
-`--url` can be the base controller URL; the script appends `/addnode`. If you
-changed `ADDNODE_PATH`, set `RWNODES_ADDNODE_PATH` for the script. If `-P` is not
-set, it reads the SSH port from sshd config and falls back to `22`. If `-I` is
-not set, it uses a public IPv4 lookup.
+When the script is loaded from `/scripts/addnode`, the controller URL and
+`ADDNODE_PATH` are already embedded into the response. If you run the repository
+copy of `scripts/addnode.sh` directly, pass `--url` or set `RWNODES_API_URL`.
+If `-P` is not set, it reads the SSH port from sshd config and falls back to
+`22`. If `-I` is not set, it uses a public IPv4 lookup.
 
 ## Parameter Presets
 

@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_URL="${RWNODES_API_URL:-}"
-ADDNODE_PATH="${RWNODES_ADDNODE_PATH:-addnode}"
+DEFAULT_API_URL="__RWNODES_DEFAULT_API_URL__"
+DEFAULT_ADDNODE_PATH="__RWNODES_DEFAULT_ADDNODE_PATH__"
+if [[ "$DEFAULT_API_URL" == "__RWNODES_DEFAULT_API_URL__" ]]; then
+  DEFAULT_API_URL=""
+fi
+if [[ "$DEFAULT_ADDNODE_PATH" == "__RWNODES_DEFAULT_ADDNODE_PATH__" ]]; then
+  DEFAULT_ADDNODE_PATH="addnode"
+fi
+
+API_URL="${RWNODES_API_URL:-$DEFAULT_API_URL}"
+ADDNODE_PATH="${RWNODES_ADDNODE_PATH:-$DEFAULT_ADDNODE_PATH}"
 SSH_PORT=""
 SSH_USER=""
 NODE_NAME=""
@@ -14,10 +23,11 @@ API_KEY=""
 usage() {
   cat <<'EOF'
 Usage:
-  addnode.sh --url https://hooks.example.com -U USER [options] (--key /path/to/key | --pass PASSWORD)
+  addnode.sh -U USER [options] (--key /path/to/key | --pass PASSWORD)
 
 Options:
   --url URL          Base controller URL. Can also be set with RWNODES_API_URL.
+                    Not needed when the script is loaded from /scripts/addnode.
                     The script appends /addnode unless URL already ends with it.
   -P sshport        SSH port. If empty, reads sshd config, fallback 22.
   -U username       SSH username. Required.
