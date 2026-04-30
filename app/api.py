@@ -35,14 +35,17 @@ class AddNodeApi:
             )
 
         base_url = self.settings.public_base_url or self.settings.webhook_url or self._request_base_url(request)
+        api_url = self._escape_bash_double_quoted(base_url.rstrip("/"))
+        addnode_path = self._escape_bash_double_quoted(self.settings.addnode_path)
         script = script.replace(
             "__RWNODES_DEFAULT_API_URL__",
-            self._escape_bash_double_quoted(base_url.rstrip("/")),
+            api_url,
         )
         script = script.replace(
             "__RWNODES_DEFAULT_ADDNODE_PATH__",
-            self._escape_bash_double_quoted(self.settings.addnode_path),
+            addnode_path,
         )
+        script = self._prepend_addnode_defaults(script, api_url, addnode_path)
         return web.Response(
             text=script,
             content_type="text/x-shellscript",
@@ -55,6 +58,16 @@ class AddNodeApi:
         proto = request.headers.get("X-Forwarded-Proto", request.scheme).split(",", 1)[0].strip()
         host = request.headers.get("X-Forwarded-Host", request.host).split(",", 1)[0].strip()
         return f"{proto}://{host}"
+
+    @staticmethod
+    def _prepend_addnode_defaults(script: str, api_url: str, addnode_path: str) -> str:
+        preamble = (
+            f'export RWNODES_API_URL="${api_url}"\n'
+            f'export RWNODES_ADDNODE_PATH="${addnode_path}"\n'
+        )
+        if script.startswith("#!/usr/bin/env bash\n"):
+            return script.replace("#!/usr/bin/env bash\n", f"#!/usr/bin/env bash\n{preamble}", 1)
+        return f"{preamble}{script}"
 
     @staticmethod
     def _escape_bash_double_quoted(value: str) -> str:
