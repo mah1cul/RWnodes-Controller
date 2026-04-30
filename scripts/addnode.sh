@@ -132,7 +132,7 @@ detect_name() {
 detect_interface_ip() {
   local iface="$1"
   ip -4 -o addr show dev "$iface" scope global 2>/dev/null \
-    | awk '{split($4, a, "/"); print a[1]; exit}'
+    | awk '{split($4, a, "/"); print a[1]; exit}' || true
 }
 
 detect_public_ip() {
@@ -154,12 +154,15 @@ if [[ -z "$NODE_NAME" ]]; then
   NODE_NAME="$(detect_name)"
 fi
 
+echo "preparing node '$NODE_NAME' for $SSH_USER via $API_URL" >&2
 if [[ -n "$INTERFACE" ]]; then
   need_cmd ip
-  NODE_HOST="$(detect_interface_ip "$INTERFACE")"
+  echo "detecting IPv4 on interface $INTERFACE" >&2
+  NODE_HOST="$(detect_interface_ip "$INTERFACE" || true)"
   [[ -n "$NODE_HOST" ]] || fail "could not detect IPv4 on interface $INTERFACE"
 else
-  NODE_HOST="$(detect_public_ip)"
+  echo "detecting public IPv4" >&2
+  NODE_HOST="$(detect_public_ip || true)"
   [[ -n "$NODE_HOST" ]] || fail "could not detect public IPv4"
 fi
 
