@@ -938,7 +938,8 @@ class BotHandlers(KeyboardMixin):
 
         text = (
             "Скрипт запускается прямо на сервере, который нужно добавить. "
-            "Адрес API передается через RWNODES_API_URL без флага --url. "
+            "Адрес API передается через sudo env RWNODES_API_URL без флага --url. "
+            "Если видишь ошибку про RWNODES_API_URL, значит была использована старая команда. "
             "Он сам определит имя, SSH-порт и IP, если не указать их явно.\n\n"
             "С SSH-ключом:\n"
             f"<pre>{html.escape(key_command)}</pre>\n"
